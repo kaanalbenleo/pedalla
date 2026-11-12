@@ -446,11 +446,14 @@ async function readFtmsCaps(ftms){
     const dv = await (await ftms.getCharacteristic(0x2ad6)).readValue();
     trainer.resRange = { min:dv.getInt16(0,true)/10, max:dv.getInt16(2,true)/10, inc:Math.max(0.1, dv.getUint16(4,true)/10) };
     if(trainer.resRange.max*10 > 255) trainer.resBytes=2;   // 1 bayt (0.1 çözünürlük) en fazla 25.5 taşır
+    // Özellik listesi hiçbir hedef bildirmiyor ama direnç aralığı var → direnç seviyesini yine de dene
+    if(!trainer.sup.sim && !trainer.sup.res && !trainer.sup.pow){ trainer.sup.res=true; trainer.sup.guess=true; }
   }catch(e){}
 }
 function ctlLabel(){
   const s=trainer.sup||{}; const a=[];
   if(s.sim) a.push('eğim'); if(s.res) a.push('direnç seviyesi'); if(s.pow) a.push('hedef watt');
+  if(s.guess) return 'direnç seviyesi deneniyor';
   return a.length ? 'otomatik: '+a.join(', ') : 'kontrol noktası var';
 }
 async function setupTrainer(){
