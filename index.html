@@ -678,15 +678,19 @@ function parseGPX(text, name){
   const raw = nodes.map(nd=>{
     const e=nd.getElementsByTagName('ele')[0], t=nd.getElementsByTagName('time')[0];
     return { lat:parseFloat(nd.getAttribute('lat')), lon:parseFloat(nd.getAttribute('lon')),
-      ele: e ? parseFloat(e.textContent) : NaN, time: t ? Date.parse(t.textContent.trim()) : NaN };
+      ele: e ? parseFloat(e.textContent) : NaN, time: t ? Date.parse(t.textContent.trim()) : NaN,
+      dist: (()=>{ const x=nd.getElementsByTagName('distance')[0]; return x ? parseFloat(x.textContent) : NaN; })() };
   }).filter(p=>isFinite(p.lat)&&isFinite(p.lon));
+  // Noktalarda <extensions><distance> (metre) varsa onu kullan: konum yaklaşık, mesafe gerçek olabilir
+  const hasDist = raw.length>1 && raw.every(p=>isFinite(p.dist)) && raw[raw.length-1].dist > raw[0].dist;
   const hasEle = raw.some(p=>isFinite(p.ele));
   let lastEle = 0; raw.forEach(p=>{ if(isFinite(p.ele)) lastEle=p.ele; else p.ele=lastEle; });
   const hasTime = raw.every(p=>isFinite(p.time)) && raw[raw.length-1].time > raw[0].time;
   const pts=[]; let d=0, t0=raw[0].time;
   for(let i=0;i<raw.length;i++){
     const p=raw[i];
-    if(i>0){ const dd=hav(raw[i-1],p); if(dd<0.3 && i<raw.length-1) continue; d+=dd; }
+    if(hasDist) d = p.dist - raw[0].dist;
+    else if(i>0){ const dd=hav(raw[i-1],p); if(dd<0.3 && i<raw.length-1) continue; d+=dd; }
     const q={ d, ele:p.ele, lat:p.lat, lon:p.lon };
     if(hasTime){
       q.t=(p.time-t0)/1000;
@@ -835,7 +839,7 @@ $('btnYt').addEventListener('click', ()=>manualYoutube());
 // Kaynak: YouTube @IndoorCyclingVideos — açıklamalardaki "without Speed Display" sürümleri.
 // kmh/g: tahmini çekim hızı ve ortalama eğim (GPX yokken sabit hız modu için).
 const LIB = [
-  {id:'DhKoQBYXS-k', t:'Val Martello → Plaus', p:'Güney Tirol, İtalya', min:91, type:'yol',      kmh:24, g:1, strava:'https://www.strava.com/activities/18880044604', src:'EWj9kUZTv6c'},
+  {id:'DhKoQBYXS-k', t:'Val Martello → Plaus', p:'Güney Tirol, İtalya', min:91, type:'yol',      kmh:24, g:1, strava:'https://www.strava.com/activities/18880044604', src:'EWj9kUZTv6c', gpx:'routes/val-martello-plaus.gpx'},
   {id:'xO-HFJJFNEc', t:'Güneşli Alp sürüşü',   p:'Alpler, İtalya',      min:30, type:'yol',      kmh:22, g:2},
   {id:'6tQj5YmqNC0', t:'Ahrntal vadisi',        p:'Alpler, İtalya',      min:null,type:'yol',     kmh:22, g:2},
   {id:'paxnmv9M3fk', t:'Güneşli Almanya turu',  p:'Almanya',             min:30, type:'yol',      kmh:27, g:1},
@@ -882,6 +886,7 @@ function showLibInfo(x){
   const el=$('libInfo'); el.style.display=''; el.innerHTML='';
   const add=(txt,href)=>{ if(href){ const a=document.createElement('a'); a.href=href; a.target='_blank'; a.rel='noopener'; a.textContent=txt; a.style.color='var(--acc)'; el.appendChild(a); } else el.appendChild(document.createTextNode(txt)); };
   if(savedGpx.has(x.id)){ add('✓ Bu video için kayıtlı GPX kullanılıyor. '); }
+  else if(x.gpx){ add('✓ Gerçek eğim hazır: bu videonun GPX\'i uygulamayla geliyor (zaman ve yükseklik videodaki Garmin göstergesinden).'); }
   else {
     add('Gerçek eğim için: ');
     if(x.strava) add('Strava kaydını aç', x.strava);
@@ -895,7 +900,7 @@ function renderLib(){
     const b=document.createElement('button'); b.className='rc'+(libSel===x.id?' sel':'');
     const [tn,tc]=TYPE_TR[x.type];
     b.innerHTML=`<div class="th" style="background-image:url('https://i.ytimg.com/vi/${x.id}/mqdefault.jpg')">
-        <i style="color:${tc}">${tn}</i>${savedGpx.has(x.id)?'<i style="left:auto;right:6px;color:#3ecf8e">GPX ✓</i>':''}${x.min?`<span>${x.min} dk</span>`:''}</div>
+        <i style="color:${tc}">${tn}</i>${(savedGpx.has(x.id)||x.gpx)?'<i style="left:auto;right:6px;color:#3ecf8e">GPX ✓</i>':''}${x.min?`<span>${x.min} dk</span>`:''}</div>
       <div class="bd"><div class="t1"></div><div class="t2"></div></div>`;
     b.querySelector('.t1').textContent=x.t;
     b.querySelector('.t2').textContent=`${x.p} · ~${x.kmh} km/s · %${x.g}`;
@@ -910,6 +915,9 @@ async function pickLib(x){
   route=null;                                     // başka sürüşün GPX'i kalmasın
   const saved = await gpxDB.get(x.id);
   if(saved){ try{ route=parseGPX(saved.text, saved.name); S.offset=saved.offset||0; }catch(e){ route=null; } }
+  else if(x.gpx){   // uygulamayla gelen, videoya senkronlanmış GPX
+    try{ const r=await fetch(x.gpx); if(r.ok) route=parseGPX(await r.text(), x.gpx.split('/').pop()); }catch(e){ route=null; }
+  }
   saveS();
   $('noGpxSpeed').value=x.kmh; $('noGpxGrade').value=x.g; $('offset').value=S.offset;
   $('cropBottom').value=0; $('cropV').textContent='0%';
