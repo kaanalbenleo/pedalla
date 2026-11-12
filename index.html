@@ -175,6 +175,7 @@
         <h2>Cihazlar</h2>
         <button class="btn wide" id="btnTrainer">🚲 Trainer bağla</button>
         <div class="status" id="stTrainer"><span class="dot"></span>Bağlı değil</div>
+        <button class="btn wide" id="btnResTest" style="margin-top:8px">🧪 Otomatik direnç testi</button>
         <button class="btn wide" id="btnHr" style="margin-top:8px">❤ Nabız bandı bağla</button>
         <div class="status" id="stHr"><span class="dot"></span>Bağlı değil</div>
         <button class="btn wide" id="btnDiag" style="margin-top:8px">🔍 Bluetooth tanı (bisiklet ne gönderiyor?)</button>
@@ -353,7 +354,13 @@ function onCPResp(dv){
     cpWrite([0x00]); resetSent();
   } else if(res!==0x01){
     console.warn('FTMS komut 0x'+op.toString(16)+' sonucu 0x'+res.toString(16));
-    if(op===0x11 && res===0x02) toast('Trainer simülasyon modunu desteklemiyor görünüyor — ERG modunu dene.');
+    if(op===0x11 && res===0x02){
+      trainer.sup.sim=false; resetSent();
+      toast(trainer.sup.res||!trainer.sup.known ? 'Bisiklet eğim komutunu desteklemiyor — direnç seviyesiyle devam ediliyor.' : 'Bisiklet eğim komutunu desteklemiyor — ERG modunu dene.');
+      if(!trainer.sup.known) trainer.sup.res=true;   // özellik okunamadıysa direnç seviyesini dene
+    }
+    if(op===0x04 && res===0x03 && trainer.resBytes===1){ trainer.resBytes=2; resetSent(); }
+    if(op===0x04 && (res===0x02 || (res===0x03 && trainer.resBytes===2))){ trainer.sup.res=false; resetSent(); toast('Bisiklet direnç seviyesi komutunu da kabul etmedi.'); }
   }
 }
 
@@ -428,10 +435,29 @@ async function connectTrainer(){
     if(e.name!=='NotFoundError') { setStatus('trainer','Bağlanamadı: '+e.message, false); }
   }
 }
+// FTMS Feature (0x2ACC) → hangi hedef komutları destekleniyor; 0x2AD6 → direnç aralığı
+async function readFtmsCaps(ftms){
+  try{
+    const dv = await (await ftms.getCharacteristic(0x2acc)).readValue();
+    const ts = dv.getUint32(4,true);
+    trainer.sup = { res:!!(ts & (1<<2)), pow:!!(ts & (1<<3)), sim:!!(ts & (1<<13)), known:true };
+  }catch(e){ console.warn('FTMS feature okunamadı', e); }
+  try{
+    const dv = await (await ftms.getCharacteristic(0x2ad6)).readValue();
+    trainer.resRange = { min:dv.getInt16(0,true)/10, max:dv.getInt16(2,true)/10, inc:Math.max(0.1, dv.getUint16(4,true)/10) };
+    if(trainer.resRange.max*10 > 255) trainer.resBytes=2;   // 1 bayt (0.1 çözünürlük) en fazla 25.5 taşır
+  }catch(e){}
+}
+function ctlLabel(){
+  const s=trainer.sup||{}; const a=[];
+  if(s.sim) a.push('eğim'); if(s.res) a.push('direnç seviyesi'); if(s.pow) a.push('hedef watt');
+  return a.length ? 'otomatik: '+a.join(', ') : 'kontrol noktası var';
+}
 async function setupTrainer(){
   setStatus('trainer','Bağlanıyor…');
   const server = await trainer.dev.gatt.connect();
   trainer.cp=null; trainer.hasControl=false;
+  trainer.sup={ sim:true, res:false, pow:false, known:false }; trainer.resRange=null; trainer.resBytes=1;
   let ftms=null; try{ ftms = await server.getPrimaryService(UUID.FTMS); }catch(e){}
   if(ftms){
     trainer.type='FTMS';
@@ -443,6 +469,7 @@ async function setupTrainer(){
       cp.addEventListener('characteristicvaluechanged', e=>onCPResp(e.target.value));
       await cp.startNotifications();          // yanıtlar indication ile gelir; yazmadan önce açılmalı
       trainer.cp=cp; trainer.hasControl=true;
+      await readFtmsCaps(ftms);
       await cpWrite([0x00]);                  // Request Control
       await cpWrite([0x07]);                  // Start / Resume
     }catch(e){ console.warn('Kontrol noktası yok', e); }
@@ -462,7 +489,7 @@ async function setupTrainer(){
     }
   }
   resetSent();
-  setStatus('trainer', `${trainer.dev.name||'Trainer'} · ${trainer.type}${trainer.hasControl?' · direnç kontrolü ✓':' · yalnızca ölçüm'}`, true);
+  setStatus('trainer', `${trainer.dev.name||'Trainer'} · ${trainer.type}${trainer.hasControl?' · '+ctlLabel()+(trainer.resRange?` (seviye ${trainer.resRange.min}–${trainer.resRange.max})`:''):' · yalnızca ölçüm'}`, true);
 }
 async function onTrainerDisconnect(){
   trainer.cp=null; trainer.hasControl=false;
@@ -501,6 +528,7 @@ async function connectHr(){
 }
 $('btnTrainer').addEventListener('click', connectTrainer);
 $('btnHr').addEventListener('click', connectHr);
+$('btnResTest').addEventListener('click', resTest);
 
 /* ========================= direnç gönderimi ========================= */
 const sent = { grade:null, erg:null, t:0, mode:null };
@@ -521,15 +549,44 @@ function updateResistance(now){
   let g = state==='riding' ? route.gradeAt(dist + Math.max(v,2)*1.0) * 100 : 0; // ~1 sn ileriye bak (trainer gecikmesi)
   g *= S.difficulty/100;
   g = Math.round(g*10)/10;
+  if(trainer.sup && trainer.sup.sim===false && trainer.sup.res){
+    // Bisiklet eğim almıyor → eğimi direnç seviyesine çevir (topuz ölçeği ayarları kullanılır)
+    const r = trainer.resRange || {min:0, max:S.resMax, inc:1};
+    const frac = clamp((S.resFlat + g/S.resPerPct - 1) / Math.max(1, S.resMax-1), 0, 1);
+    let lvl = r.min + frac*(r.max-r.min); lvl = Math.round(lvl/r.inc)*r.inc;
+    if(sent.mode!=='res' || lvl!==sent.grade && now-sent.t>1500 || now-sent.t>10000){
+      sendRes(lvl); sent.grade=lvl; sent.t=now; sent.mode='res';
+    }
+    return;
+  }
   const changed = sent.grade===null || sent.mode!=='sim' || Math.abs(g-sent.grade)>=0.2;
   if((changed && now-sent.t>900) || now-sent.t>10000){
     sendSim(g); sent.grade=g; sent.t=now; sent.mode='sim';
   }
 }
+function sendRes(lvl){
+  const v=Math.round(lvl*10);              // FTMS: 0.1 çözünürlük
+  cpWrite(trainer.resBytes===1 ? [0x04, clamp(v,0,255)] : [0x04, ...i16(v)]);
+  trainer.lastRes=lvl;
+}
+// Elle test: seviyeyi düşük → orta → yüksek yapar; kullanıcı pedalda farkı hisseder
+async function resTest(){
+  if(!trainer.hasControl){ toast('Önce trainer bağla.'); return; }
+  const r = trainer.resRange || {min:0, max:S.resMax, inc:1};
+  const steps=[r.min, r.min+(r.max-r.min)*0.5, r.max, r.min];
+  const names=['en düşük','orta','en yüksek','en düşük'];
+  for(let i=0;i<steps.length;i++){
+    const l=Math.round(steps[i]/r.inc)*r.inc;
+    toast(`Direnç testi: ${names[i]} (${l}) — pedal çevir, sertlik değişiyor mu?`, 4500);
+    sendRes(l); await new Promise(z=>setTimeout(z,5000));
+  }
+  resetSent();
+  toast('Test bitti. Sertlik değiştiyse otomatik direnç çalışıyor demektir.', 5000);
+}
 
 /* ========================= elle direnç önerisi ========================= */
 const res = { shown:null, cand:null, candAt:0, bannerT:null };
-const manualMode = () => S.mode==='sim' && !trainer.hasControl;
+const manualMode = () => S.mode==='sim' && !(trainer.hasControl && trainer.sup && (trainer.sup.sim || trainer.sup.res));
 function targetLevel(){
   if(!route) return S.resFlat;
   let g = route.gradeAt(dist + Math.max(v,2)*3) * 100 * S.difficulty/100;   // ~3 sn ileri: topuzu çevirmeye zaman
@@ -565,7 +622,7 @@ const hex = dv => [...new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength)].m
 const shortU = u => /^0000([0-9a-f]{4})-0000-1000-8000-00805f9b34fb$/.test(u) ? '0x'+u.slice(4,8) : u;
 const KNOWN = {'0x1826':'FTMS','0x1818':'Cycling Power','0x1816':'Speed & Cadence','0x180d':'Heart Rate','0x180a':'Device Info','0x180f':'Battery',
   '0x2ad2':'Indoor Bike Data','0x2ad9':'FTMS Control Point','0x2acc':'FTMS Feature','0x2a63':'Power Measurement','0x2a5b':'CSC Measurement','0x2a37':'HR Measurement',
-  '0x2a29':'Üretici','0x2a24':'Model','0x2a26':'Firmware','0x2a19':'Pil %'};
+  '0x2a29':'Üretici','0x2a24':'Model','0x2a26':'Firmware','0x2a19':'Pil %','0x2ad6':'Direnç aralığı','0x2ad8':'Güç aralığı','0x2ada':'FTMS durum'};
 async function runDiag(){
   if(!navigator.bluetooth){ toast('Web Bluetooth yok.'); return; }
   const out=$('diag'); out.style.display='block'; out.textContent='Cihaz seç… (pedal çevirmeye devam et)\n';
@@ -587,6 +644,10 @@ async function runDiag(){
         let val='';
         if(p.read){ try{ const dv=await c.readValue(); val = s.uuid.includes('180a') ? ' = "'+new TextDecoder().decode(dv).replace(/\0/g,'')+'"' : ' = '+hex(dv); }catch(e){} }
         log(`  · ${cu} ${KNOWN[cu]||''} [${props}]${val}`);
+        if(cu==='0x2acc' && p.read){ try{ const dv=await c.readValue(); const ts=dv.getUint32(4,true);
+          const n={0:'hız',1:'eğim',2:'direnç seviyesi',3:'hedef watt',4:'nabız',13:'eğim simülasyonu',15:'tekerlek çevresi',16:'spin down'};
+          log('     ↳ desteklenen hedefler: '+(Object.keys(n).filter(b=>ts&(1<<b)).map(b=>n[b]).join(', ')||'yok')); }catch(e){} }
+        if(cu==='0x2ad6' && p.read){ try{ const dv=await c.readValue(); log(`     ↳ direnç ${dv.getInt16(0,true)/10} … ${dv.getInt16(2,true)/10} (adım ${dv.getUint16(4,true)/10})`); }catch(e){} }
         if(p.notify||p.indicate) subs.push(c);
       }
     }
