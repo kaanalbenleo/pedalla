@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Pedalla — Video Rota Antrenmanı</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root{
+    --bg:#0b0d10; --card:rgba(18,21,26,.86); --line:rgba(255,255,255,.10);
+    --txt:#eef1f4; --mut:#9aa4af; --acc:#ff6a2b; --ok:#3ecf8e; --warn:#ffb020; --bad:#ff4d4d;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden;
+    user-select:none;-webkit-user-select:none}
+  #vid{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+  #ytWrap{position:fixed;inset:0;overflow:hidden;display:none;background:#000;pointer-events:none}
+  #ytWrap iframe{position:absolute;border:0}
+  #vid.cropped{object-fit:fill;inset:auto}
+  input[type=url]{flex:1;min-width:0;background:#0f1216;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:inherit}
+  #noVideo{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at 50% 120%,#1d3a2a 0%,#0e1a22 45%,#07090c 100%);
+    color:var(--mut);font-size:14px;text-align:center;padding:20px}
+  #noVideo b{display:block;color:var(--txt);font-size:22px;letter-spacing:.5px;margin-bottom:6px}
+
+  /* HUD */
+  #hud{position:fixed;left:0;right:0;top:0;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;
+    padding:calc(env(safe-area-inset-top) + 10px) 10px 10px;pointer-events:none;
+    background:linear-gradient(to bottom,rgba(0,0,0,.55),rgba(0,0,0,0))}
+  .tile{background:rgba(10,12,15,.62);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+    border:1px solid var(--line);border-radius:12px;padding:6px 12px 7px;min-width:92px;text-align:center}
+  .tile .k{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.8px}
+  .tile .v{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+  .tile .u{font-size:12px;color:var(--mut);margin-left:3px;font-weight:500}
+  .tile.big .v{font-size:42px}
+  .tile.big{min-width:130px;border-color:rgba(255,106,43,.45)}
+  #tGrade .v{transition:color .3s}
+  #minimap{position:fixed;left:calc(12px + env(safe-area-inset-left));bottom:calc(122px + env(safe-area-inset-bottom));
+    width:230px;height:165px;border-radius:14px;overflow:hidden;border:2px solid rgba(255,255,255,.28);
+    box-shadow:0 6px 24px rgba(0,0,0,.45);display:none;z-index:3;background:#1b2128}
+  #minimap .leaflet-control-attribution{font-size:8px;background:rgba(0,0,0,.4);color:#ccc}
+  #minimap .leaflet-control-attribution a{color:#ccc}
+  @media (max-height:480px){ #minimap{width:170px;height:120px} }
+  #resBanner{position:fixed;left:50%;top:38%;transform:translate(-50%,-50%) scale(.9);z-index:4;
+    padding:16px 28px;border-radius:18px;font-size:34px;font-weight:800;color:#fff;letter-spacing:.3px;
+    background:rgba(255,106,43,.92);box-shadow:0 10px 40px rgba(0,0,0,.5);opacity:0;pointer-events:none;
+    transition:opacity .25s,transform .25s;white-space:nowrap}
+  #resBanner.down{background:rgba(74,163,255,.92)}
+  #resBanner.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  #diag{white-space:pre-wrap;font:11.5px/1.4 ui-monospace,Menlo,monospace;background:#0b0e12;border:1px solid var(--line);
+    border-radius:8px;padding:8px;max-height:220px;overflow:auto;margin-top:8px;user-select:text;-webkit-user-select:text;display:none}
+
+  /* profil */
+  #profileWrap{position:fixed;left:0;right:0;bottom:0;height:calc(96px + env(safe-area-inset-bottom));
+    padding-bottom:env(safe-area-inset-bottom);
+    background:linear-gradient(to top,rgba(0,0,0,.7),rgba(0,0,0,0));pointer-events:none}
+  #profile{width:100%;height:96px;display:block}
+  #profInfo{position:absolute;left:12px;top:-22px;font-size:12px;color:#dfe5ea;
+    text-shadow:0 1px 3px #000;font-variant-numeric:tabular-nums}
+
+  /* yüzen butonlar */
+  #fab{position:fixed;right:calc(12px + env(safe-area-inset-right));bottom:calc(108px + env(safe-area-inset-bottom));
+    display:flex;flex-direction:column;gap:10px;z-index:5}
+  #fab button{width:54px;height:54px;border-radius:50%;border:1px solid var(--line);
+    background:rgba(10,12,15,.7);color:var(--txt);font-size:22px;backdrop-filter:blur(6px)}
+  #fab button:active{transform:scale(.94)}
+  #btnPlay{background:var(--acc)!important;border-color:transparent!important}
+
+  /* panel */
+  #panel{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.55);padding:12px}
+  #panel.hidden{display:none}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;width:100%;max-width:860px;
+    max-height:100%;overflow:auto;padding:18px 18px 14px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+  .card h1{margin:0 0 2px;font-size:22px}
+  .card h1 span{color:var(--acc)}
+  .sub{color:var(--mut);font-size:13px;margin-bottom:14px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:640px){.grid{grid-template-columns:1fr}}
+  .sec{border:1px solid var(--line);border-radius:14px;padding:12px}
+  .sec h2{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--mut)}
+  .row{display:flex;align-items:center;gap:10px;margin:8px 0}
+  .row label{flex:1;font-size:14px}
+  .row input[type=number]{width:86px}
+  input[type=number],select{background:#0f1216;color:var(--txt);border:1px solid var(--line);
+    border-radius:8px;padding:7px 8px;font:inherit}
+  input[type=range]{flex:1;accent-color:var(--acc)}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line);
+    background:#1a1f26;color:var(--txt);border-radius:10px;padding:10px 14px;font:inherit;font-weight:600;cursor:pointer}
+  .btn.pri{background:var(--acc);border-color:transparent;color:#fff}
+  .btn:disabled{opacity:.45}
+  .btn.wide{width:100%}
+  .file{position:relative;overflow:hidden}
+  .file input{position:absolute;inset:0;opacity:0;cursor:pointer}
+  .status{font-size:12.5px;color:var(--mut);margin-top:4px;min-height:18px}
+  .status.ok{color:var(--ok)} .status.bad{color:var(--bad)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#555;margin-right:6px}
+  .dot.ok{background:var(--ok)}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .actions .btn{flex:1;min-width:140px}
+  .note{font-size:12.5px;color:var(--warn);margin-top:6px}
+  .hint{font-size:12px;color:var(--mut);line-height:1.45}
+  .seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .seg button{flex:1;background:transparent;color:var(--mut);border:0;padding:8px;font:inherit;font-weight:600}
+  .seg button.on{background:#262d36;color:var(--txt)}
+  #toast{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:30;max-width:90%;
+    background:rgba(20,22,26,.95);border:1px solid var(--line);border-radius:12px;padding:12px 16px;
+    font-size:14px;display:none;text-align:center}
+  #summary .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
+  #lib{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px;max-height:46vh;overflow:auto;padding-right:2px}
+  .rc{background:#12161b;border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;text-align:left;
+    color:var(--txt);padding:0;font:inherit}
+  .rc.sel{border-color:var(--acc);box-shadow:0 0 0 2px rgba(255,106,43,.35)}
+  .rc .th{position:relative;aspect-ratio:16/9;background:#222 center/cover no-repeat}
+  .rc .th span{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.75);font-size:11px;padding:1px 6px;border-radius:5px}
+  .rc .th i{position:absolute;left:6px;top:6px;font-style:normal;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:5px;background:rgba(0,0,0,.65)}
+  .rc .bd{padding:7px 9px 9px}
+  .rc .t1{font-weight:650;font-size:13.5px;line-height:1.25}
+  .rc .t2{font-size:11.5px;color:var(--mut);margin-top:3px}
+  #summary .stats div{background:#12161b;border-radius:10px;padding:8px;text-align:center}
+  #summary .stats b{display:block;font-size:20px}
+  #summary .stats span{font-size:11px;color:var(--mut)}
+</style>
+</head>
+<body>
+
+<video id="vid" playsinline muted preload="auto"></video>
+<div id="ytWrap"><div id="yt"></div></div>
+<div id="noVideo"><div><b>Pedalla</b>Video yüklenmedi — yalnızca GPX profiliyle de sürebilirsin.</div></div>
+
+<div id="hud">
+  <div class="tile big" id="tPow"><div class="k">Güç</div><div class="v">—<span class="u">W</span></div></div>
+  <div class="tile" id="tCad"><div class="k">Kadans</div><div class="v">—<span class="u">rpm</span></div></div>
+  <div class="tile" id="tSpd"><div class="k">Hız</div><div class="v">0.0<span class="u">km/s</span></div></div>
+  <div class="tile" id="tHr"><div class="k">Nabız</div><div class="v">—<span class="u">bpm</span></div></div>
+  <div class="tile" id="tGrade"><div class="k">Eğim</div><div class="v">0.0<span class="u">%</span></div></div>
+  <div class="tile big" id="tRes" style="display:none"><div class="k">Direnç (topuz)</div><div class="v">—<span class="u" id="tResMax">/10</span></div></div>
+  <div class="tile" id="tDist"><div class="k">Mesafe</div><div class="v">0.00<span class="u">km</span></div></div>
+  <div class="tile" id="tTime"><div class="k">Süre</div><div class="v">0:00</div></div>
+  <div class="tile" id="tAsc"><div class="k">Tırmanış</div><div class="v">0<span class="u">m</span></div></div>
+</div>
+
+<div id="resBanner"></div>
+<div id="minimap" title="Dokun: tüm rota / takip"></div>
+<div id="profileWrap"><div id="profInfo"></div><canvas id="profile"></canvas></div>
+
+<div id="fab">
+  <button id="btnPlay" title="Başlat / Duraklat">▶</button>
+  <button id="btnPanel" title="Ayarlar">⚙</button>
+  <button id="btnFull" title="Tam ekran">⛶</button>
+</div>
+
+<div id="panel">
+  <div class="card">
+    <h1>Pedal<span>la</span></h1>
+    <div class="sub">Video rota antrenmanı · FTMS akıllı trainer · Web Bluetooth</div>
+    <div id="bleWarn" class="note" style="display:none;margin-bottom:10px"></div>
+
+    <div class="sec" style="margin-bottom:12px">
+      <h2>Rota kütüphanesi <span style="text-transform:none;letter-spacing:0;font-weight:400">· YouTube · göstergesiz sürümler</span></h2>
+      <div class="seg" id="libSeg" style="margin-bottom:10px">
+        <button data-f="all" class="on">Hepsi</button><button data-f="yol">Düz yol</button><button data-f="tirmanis">Tırmanış</button><button data-f="mtb">MTB</button>
+      </div>
+      <div id="lib"></div>
+      <div class="hint" style="margin-top:6px">GPX'siz videolar tahmini sabit hız ve eğimle oynar. Video seçiliyken GPX yüklersen o videoya kaydedilir ve gerçek yokuşlar her seferinde otomatik gelir.</div>
+      <div id="libInfo" class="hint" style="margin-top:6px;display:none"></div>
+    </div>
+
+    <div class="grid">
+      <div class="sec">
+        <h2>Cihazlar</h2>
+        <button class="btn wide" id="btnTrainer">🚲 Trainer bağla</button>
+        <div class="status" id="stTrainer"><span class="dot"></span>Bağlı değil</div>
+        <button class="btn wide" id="btnHr" style="margin-top:8px">❤ Nabız bandı bağla</button>
+        <div class="status" id="stHr"><span class="dot"></span>Bağlı değil</div>
+        <button class="btn wide" id="btnDiag" style="margin-top:8px">🔍 Bluetooth tanı (bisiklet ne gönderiyor?)</button>
+        <div id="diag"></div>
+        <button class="btn wide" id="btnDiagCopy" style="margin-top:6px;display:none">📋 Tanı çıktısını kopyala</button>
+        <div class="row" style="margin-top:10px">
+          <label>Demo güç (trainer yokken)</label>
+          <input type="range" id="demoW" min="0" max="500" step="5">
+          <span id="demoWv" style="width:48px;text-align:right">0 W</span>
+        </div>
+      </div>
+
+      <div class="sec">
+        <h2>Rota</h2>
+        <div style="display:flex;gap:8px">
+          <label class="btn file" style="flex:1">🎬 Video seç<input type="file" id="fVideo" accept="video/*"></label>
+          <label class="btn file" style="flex:1">🗺 GPX seç<input type="file" id="fGpx" accept=".gpx,application/gpx+xml,application/xml,text/xml"></label>
+        </div>
+        <div class="row" style="margin-top:8px"><input type="url" id="ytUrl" placeholder="veya YouTube linki yapıştır"><button class="btn" id="btnYt">▶ YouTube</button></div>
+        <div class="status" id="stRoute">Video ve/veya GPX yükle</div>
+        <div class="row"><label>Alttan kırp (videodaki hız göstergesini gizler)</label><input type="range" id="cropBottom" min="0" max="35" step="1"><span id="cropV" style="width:40px;text-align:right"></span></div>
+        <div id="routeNote" class="note" style="display:none"></div>
+        <div class="row"><label>GPX başlangıcı videoda (sn)</label><input type="number" id="offset" step="0.5"></div>
+        <div id="noGpxBox">
+          <div class="hint">GPX yoksa: video sabit hızla çekilmiş varsayılır.</div>
+          <div class="row"><label>Videonun çekim hızı (km/s)</label><input type="number" id="noGpxSpeed" step="1" min="3"></div>
+          <div class="row"><label>Sabit eğim (%)</label><input type="number" id="noGpxGrade" step="0.5"></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <h2>Sürüş modu</h2>
+        <div class="seg" id="modeSeg">
+          <button data-m="sim">Simülasyon (eğim)</button>
+          <button data-m="erg">ERG (sabit watt)</button>
+        </div>
+        <div class="row" id="rowDiff"><label>Trainer zorluğu</label><input type="range" id="difficulty" min="0" max="100" step="5"><span id="diffV" style="width:44px;text-align:right"></span></div>
+        <div class="row" id="rowErg"><label>ERG hedefi (W)</label><input type="number" id="ergW" step="5" min="0"></div>
+        <div class="hint">Zorluk %50: %8'lik yokuş trainer'da %4 hissettirir. Hız ve video her zaman gerçek eğime göre hesaplanır.</div>
+        <div id="manualBox" style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
+          <div class="hint">Elle ayarlanan direnç (topuz): eğime göre önerilen seviye ekranda gösterilir.</div>
+          <div class="row"><label>Topuz ölçeği (en yüksek seviye)</label><input type="number" id="resMax" step="1" min="2"></div>
+          <div class="row"><label>Düz yolda seviye</label><input type="number" id="resFlat" step="1" min="1"></div>
+          <div class="row"><label>Her +1 seviye kaç % eğim</label><input type="number" id="resPerPct" step="0.5" min="0.5"></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <h2>Sürücü</h2>
+        <div class="row"><label>Kilon (kg)</label><input type="number" id="riderKg" step="0.5" min="30"></div>
+        <div class="row"><label>Bisiklet (kg)</label><input type="number" id="bikeKg" step="0.5" min="3"></div>
+        <div class="row"><label>CdA (m²) — 0.25 aero · 0.32 drop · 0.40 dik</label><input type="number" id="cda" step="0.01" min="0.15"></div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn pri" id="btnStart">▶ Sürüşe başla</button>
+      <button class="btn" id="btnFinish">🏁 Bitir ve TCX indir</button>
+      <button class="btn" id="btnClose">Kapat</button>
+    </div>
+  </div>
+</div>
+
+<div id="panelSummary" class="hidden" style="position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);padding:12px">
+  <div class="card" id="summary" style="max-width:520px">
+    <h1>Sürüş <span>bitti</span></h1>
+    <div class="stats" id="sumStats"></div>
+    <div class="actions">
+      <button class="btn pri" id="btnTcx">⬇ TCX indir (Strava/Garmin)</button>
+      <button class="btn" id="btnNew">Yeni sürüş</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* ========================= yardımcılar ========================= */
+const $ = id => document.getElementById(id);
+const clamp = (x,a,b) => Math.max(a, Math.min(b, x));
+const fmtTime = s => { s=Math.max(0,Math.floor(s)); const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60;
+  return h ? `${h}:${String(m).padStart(2,'0')}:${String(x).padStart(2,'0')}` : `${m}:${String(x).padStart(2,'0')}`; };
+let toastT; function toast(msg, ms=3500){ const t=$('toast'); t.textContent=msg; t.style.display='block';
+  clearTimeout(toastT); toastT=setTimeout(()=>t.style.display='none', ms); }
+
+/* ========================= ayarlar ========================= */
+const DEF = { riderKg:75, bikeKg:9, cda:0.32, crr:0.004, difficulty:50, mode:'sim', ergW:150,
+  offset:0, noGpxSpeed:25, noGpxGrade:0, demoW:0, resMax:10, resFlat:3, resPerPct:2, cropBottom:0 };
+const S = Object.assign({}, DEF);
+try { Object.assign(S, JSON.parse(localStorage.getItem('pedalla.settings')||'{}')); } catch(e){}
+function saveS(){ try{ localStorage.setItem('pedalla.settings', JSON.stringify(S)); }catch(e){} }
+
+function bindNum(id, key, after){
+  const el=$(id); el.value=S[key];
+  el.addEventListener('change', ()=>{ const v=parseFloat(el.value); if(isFinite(v)){ S[key]=v; saveS(); after&&after(); } else el.value=S[key]; });
+}
+bindNum('riderKg','riderKg'); bindNum('bikeKg','bikeKg'); bindNum('cda','cda', ()=>resetSent());
+bindNum('ergW','ergW', ()=>resetSent());
+bindNum('offset','offset', ()=>{ if(route && !route.synthetic && vid.duration){ route.videoSpan=Math.max(1, vid.duration-S.offset); onRouteReady(); } saveOffsetForSelected(); });
+bindNum('resMax','resMax', ()=>{ $('tResMax').textContent='/'+S.resMax; res.shown=null; });
+bindNum('resFlat','resFlat', ()=>{ res.shown=null; });
+bindNum('resPerPct','resPerPct', ()=>{ res.shown=null; });
+$('tResMax').textContent='/'+S.resMax;
+bindNum('noGpxSpeed','noGpxSpeed', ()=>{ if(route && route.synthetic) buildSyntheticRoute(); });
+bindNum('noGpxGrade','noGpxGrade', ()=>{ if(route && route.synthetic) buildSyntheticRoute(); });
+$('difficulty').value=S.difficulty; $('diffV').textContent=S.difficulty+'%';
+$('difficulty').addEventListener('input', e=>{ S.difficulty=+e.target.value; $('diffV').textContent=S.difficulty+'%'; saveS(); resetSent(); });
+$('demoW').value=S.demoW; $('demoWv').textContent=S.demoW+' W';
+$('demoW').addEventListener('input', e=>{ S.demoW=+e.target.value; $('demoWv').textContent=S.demoW+' W'; saveS(); });
+function renderMode(){
+  document.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('on', b.dataset.m===S.mode));
+  $('rowDiff').style.display = S.mode==='sim' ? '' : 'none';
+  $('rowErg').style.display  = S.mode==='erg' ? '' : 'none';
+}
+document.querySelectorAll('#modeSeg button').forEach(b=>b.addEventListener('click', ()=>{ S.mode=b.dataset.m; saveS(); renderMode(); resetSent(); }));
+renderMode();
+
+/* ========================= canlı veriler ========================= */
+const live = { power:null, powerAt:0, cad:null, cadAt:0, hr:null, hrAt:0, speed:null, speedAt:0, powerSeen:false };
+const powBuf = []; // 3 sn ortalama
+function setPower(w){ live.power = Math.max(0,w); live.powerAt = performance.now(); if(w>0) live.powerSeen=true; }
+function setSpeed(kmh){ live.speed = kmh; live.speedAt = performance.now(); }
+function trainerConnected(){ return !!(trainer.dev && trainer.dev.gatt && trainer.dev.gatt.connected); }
+// Cihaz watt göndermiyorsa (ucuz spin bike'larda sık) hızı doğrudan cihazdan al
+function speedMode(){ return trainerConnected() && !live.powerSeen && performance.now()-live.speedAt < 3000; }
+function setCad(c){ live.cad = c; live.cadAt = performance.now(); }
+function currentPower(){
+  const fresh = performance.now() - live.powerAt < 3000;
+  if (trainerConnected()){
+    if(!live.powerSeen) return null;          // cihaz watt göndermiyor
+    return fresh ? live.power : 0;
+  }
+  return S.demoW; // trainer yok: demo
+}
+function currentCad(){
+  if (trainer.dev && trainer.dev.gatt && trainer.dev.gatt.connected) return performance.now()-live.cadAt < 3000 ? live.cad : 0;
+  return S.demoW > 0 ? 85 : 0;
+}
+function currentHr(){ return performance.now()-live.hrAt < 5000 ? live.hr : null; }
+
+/* ========================= Bluetooth ========================= */
+const UUID = { FTMS:0x1826, IBD:0x2ad2, FTMS_CP:0x2ad9, CPS:0x1818, CPM:0x2a63, CSC:0x1816, CSCM:0x2a5b, HRS:0x180d, HRM:0x2a37 };
+const trainer = { dev:null, cp:null, hasControl:false, type:null, retries:0 };
+const hrSensor = { dev:null };
+
+function setStatus(which, text, ok){
+  const el=$(which==='trainer'?'stTrainer':'stHr');
+  el.innerHTML = `<span class="dot ${ok?'ok':''}"></span>`; el.appendChild(document.createTextNode(text));
+  el.className = 'status' + (ok===true?' ok': ok===false?' bad':'');
+}
+
+(function checkBle(){
+  const w=$('bleWarn');
+  if(!window.isSecureContext){ w.style.display=''; w.textContent='⚠ Sayfa güvenli bağlantıyla (https) açılmamış — Bluetooth çalışmaz. GitHub Pages gibi bir https adresinden aç.'; }
+  else if(!navigator.bluetooth){ w.style.display=''; w.textContent='⚠ Bu tarayıcıda Web Bluetooth yok. Android\'de Chrome kullan. (Bluetooth olmadan demo güçle deneyebilirsin.)'; }
+})();
+
+// GATT yazmalarını sıraya koy — aynı anda iki yazma "operation in progress" hatası verir
+let cpQueue = Promise.resolve();
+function cpWrite(bytes){
+  cpQueue = cpQueue.then(async ()=>{
+    if(!trainer.cp) return;
+    const data = new Uint8Array(bytes);
+    if (trainer.cp.writeValueWithResponse) await trainer.cp.writeValueWithResponse(data);
+    else await trainer.cp.writeValue(data);
+  }).catch(e=>console.warn('CP yazma hatası', e));
+  return cpQueue;
+}
+const i16 = v => { v=Math.round(v); return [v & 0xff, (v>>8) & 0xff]; };
+
+function onCPResp(dv){
+  if(dv.getUint8(0)!==0x80) return;
+  const op=dv.getUint8(1), res=dv.getUint8(2);
+  if(res===0x05){ // Control Not Permitted → kontrolü yeniden iste
+    cpWrite([0x00]); resetSent();
+  } else if(res!==0x01){
+    console.warn('FTMS komut 0x'+op.toString(16)+' sonucu 0x'+res.toString(16));
+    if(op===0x11 && res===0x02) toast('Trainer simülasyon modunu desteklemiyor görünüyor — ERG modunu dene.');
+  }
+}
+
+// FTMS Indoor Bike Data (0x2AD2)
+function parseIBD(dv){
+  try{
+    const f = dv.getUint16(0,true); let o=2;
+    if(!(f & 0x0001)){ setSpeed(dv.getUint16(o,true)/100); o+=2; } // anlık hız (yalnızca cihaz watt vermezse kullanılır)
+    if(f & 0x0002) o+=2;                        // ort. hız
+    if(f & 0x0004){ setCad(dv.getUint16(o,true)/2); o+=2; }
+    if(f & 0x0008) o+=2;                        // ort. kadans
+    if(f & 0x0010) o+=3;                        // toplam mesafe
+    if(f & 0x0020) o+=2;                        // direnç seviyesi
+    if(f & 0x0040){ setPower(dv.getInt16(o,true)); o+=2; }
+    if(f & 0x0080) o+=2;                        // ort. güç
+    if(f & 0x0100) o+=5;                        // enerji
+    if(f & 0x0200){ const h=dv.getUint8(o); o+=1; if(h>0 && !(hrSensor.dev && hrSensor.dev.gatt.connected)){ live.hr=h; live.hrAt=performance.now(); } }
+  }catch(e){ /* kısa paket */ }
+}
+
+// Cycling Power Measurement (0x2A63) — yalnızca ölçüm yapan cihazlar için
+const crank = { r:null, t:null, lastChange:0 };
+function parseCPM(dv){
+  try{
+    const f=dv.getUint16(0,true); setPower(dv.getInt16(2,true)); let o=4;
+    if(f & 0x01) o+=1; if(f & 0x04) o+=2; if(f & 0x10) o+=6;
+    if(f & 0x20){
+      const r=dv.getUint16(o,true), t=dv.getUint16(o+2,true), now=performance.now();
+      if(crank.r!==null){
+        const dr=(r-crank.r)&0xffff, dt=((t-crank.t)&0xffff)/1024;
+        if(dr>0 && dt>0){ setCad(clamp(dr/dt*60,0,200)); crank.lastChange=now; }
+        else if(now-crank.lastChange>3000) setCad(0);
+      }
+      crank.r=r; crank.t=t;
+    }
+  }catch(e){}
+}
+
+// Cycling Speed & Cadence (0x2A5B) — basit hız/kadans sensörleri
+const cscW = { r:null, t:null, last:0 }, cscC = { r:null, t:null, last:0 };
+const WHEEL_M = 2.105;
+function parseCSC(dv){
+  try{
+    const f=dv.getUint8(0); let o=1; const now=performance.now();
+    if(f & 1){
+      const r=dv.getUint32(o,true), t=dv.getUint16(o+4,true); o+=6;
+      if(cscW.r!==null){ const dr=r-cscW.r, dt=((t-cscW.t)&0xffff)/1024;
+        if(dr>0 && dt>0){ setSpeed(dr*WHEEL_M/dt*3.6); cscW.last=now; } else if(now-cscW.last>3000) setSpeed(0); }
+      cscW.r=r; cscW.t=t;
+    }
+    if(f & 2){
+      const r=dv.getUint16(o,true), t=dv.getUint16(o+2,true);
+      if(cscC.r!==null){ const dr=(r-cscC.r)&0xffff, dt=((t-cscC.t)&0xffff)/1024;
+        if(dr>0 && dt>0){ setCad(clamp(dr/dt*60,0,200)); cscC.last=now; } else if(now-cscC.last>3000) setCad(0); }
+      cscC.r=r; cscC.t=t;
+    }
+  }catch(e){}
+}
+
+async function connectTrainer(){
+  if(!navigator.bluetooth){ toast('Web Bluetooth yok. Android\'de Chrome ile, https adresinden aç.'); return; }
+  try{
+    const dev = await navigator.bluetooth.requestDevice({
+      filters:[{services:[UUID.FTMS]},{services:[UUID.CPS]},{services:[UUID.CSC]}],
+      optionalServices:[UUID.FTMS, UUID.CPS, UUID.CSC, UUID.HRS]
+    });
+    if(trainer.dev && trainer.dev!==dev){ try{ trainer.dev.gatt.disconnect(); }catch(e){} }
+    trainer.dev=dev; trainer.retries=0;
+    dev.addEventListener('gattserverdisconnected', onTrainerDisconnect);
+    await setupTrainer();
+  }catch(e){
+    if(e.name!=='NotFoundError') { setStatus('trainer','Bağlanamadı: '+e.message, false); }
+  }
+}
+async function setupTrainer(){
+  setStatus('trainer','Bağlanıyor…');
+  const server = await trainer.dev.gatt.connect();
+  trainer.cp=null; trainer.hasControl=false;
+  let ftms=null; try{ ftms = await server.getPrimaryService(UUID.FTMS); }catch(e){}
+  if(ftms){
+    trainer.type='FTMS';
+    const ibd = await ftms.getCharacteristic(UUID.IBD);
+    ibd.addEventListener('characteristicvaluechanged', e=>parseIBD(e.target.value));
+    await ibd.startNotifications();
+    try{
+      const cp = await ftms.getCharacteristic(UUID.FTMS_CP);
+      cp.addEventListener('characteristicvaluechanged', e=>onCPResp(e.target.value));
+      await cp.startNotifications();          // yanıtlar indication ile gelir; yazmadan önce açılmalı
+      trainer.cp=cp; trainer.hasControl=true;
+      await cpWrite([0x00]);                  // Request Control
+      await cpWrite([0x07]);                  // Start / Resume
+    }catch(e){ console.warn('Kontrol noktası yok', e); }
+  } else {
+    let cps=null; try{ cps = await server.getPrimaryService(UUID.CPS); }catch(e){}
+    if(cps){
+      trainer.type='Güç ölçer';
+      const m = await cps.getCharacteristic(UUID.CPM);
+      m.addEventListener('characteristicvaluechanged', e=>parseCPM(e.target.value));
+      await m.startNotifications();
+    } else {
+      trainer.type='Hız/kadans';
+      const csc = await server.getPrimaryService(UUID.CSC);
+      const m = await csc.getCharacteristic(UUID.CSCM);
+      m.addEventListener('characteristicvaluechanged', e=>parseCSC(e.target.value));
+      await m.startNotifications();
+    }
+  }
+  resetSent();
+  setStatus('trainer', `${trainer.dev.name||'Trainer'} · ${trainer.type}${trainer.hasControl?' · direnç kontrolü ✓':' · yalnızca ölçüm'}`, true);
+}
+async function onTrainerDisconnect(){
+  trainer.cp=null; trainer.hasControl=false;
+  setStatus('trainer','Bağlantı koptu — yeniden deneniyor…', false);
+  while(trainer.retries<6){
+    trainer.retries++;
+    await new Promise(r=>setTimeout(r, 1500*trainer.retries));
+    try{ await setupTrainer(); trainer.retries=0; toast('Trainer yeniden bağlandı'); return; }catch(e){}
+  }
+  setStatus('trainer','Bağlantı koptu. "Trainer bağla"ya yeniden bas.', false);
+}
+
+async function connectHr(){
+  if(!navigator.bluetooth){ toast('Web Bluetooth yok.'); return; }
+  try{
+    const dev = await navigator.bluetooth.requestDevice({filters:[{services:[UUID.HRS]}]});
+    hrSensor.dev=dev;
+    const setup = async ()=>{
+      setStatus('hr','Bağlanıyor…');
+      const s = await dev.gatt.connect();
+      const c = await (await s.getPrimaryService(UUID.HRS)).getCharacteristic(UUID.HRM);
+      c.addEventListener('characteristicvaluechanged', e=>{
+        const v=e.target.value, f=v.getUint8(0);
+        live.hr = (f & 1) ? v.getUint16(1,true) : v.getUint8(1); live.hrAt=performance.now();
+      });
+      await c.startNotifications();
+      setStatus('hr', (dev.name||'Nabız bandı')+' · bağlı', true);
+    };
+    dev.addEventListener('gattserverdisconnected', async ()=>{
+      setStatus('hr','Bağlantı koptu — yeniden deneniyor…', false);
+      for(let i=1;i<=5;i++){ await new Promise(r=>setTimeout(r,1500*i)); try{ await setup(); return; }catch(e){} }
+      setStatus('hr','Bağlantı koptu.', false);
+    });
+    await setup();
+  }catch(e){ if(e.name!=='NotFoundError') setStatus('hr','Bağlanamadı: '+e.message, false); }
+}
+$('btnTrainer').addEventListener('click', connectTrainer);
+$('btnHr').addEventListener('click', connectHr);
+
+/* ========================= direnç gönderimi ========================= */
+const sent = { grade:null, erg:null, t:0, mode:null };
+function resetSent(){ sent.grade=null; sent.erg=null; sent.t=0; sent.mode=null; }
+function sendSim(gradePct){
+  const crr = clamp(Math.round(S.crr*10000),0,255);
+  const cw  = clamp(Math.round(0.5*1.225*S.cda*100),0,255);   // kg/m × 100
+  cpWrite([0x11, 0,0, ...i16(clamp(gradePct,-40,40)*100), crr, cw]);
+}
+function updateResistance(now){
+  if(!trainer.hasControl || !trainer.cp) return;
+  if(S.mode==='erg'){
+    if(sent.mode!=='erg' || sent.erg!==S.ergW || now-sent.t>15000){
+      cpWrite([0x05, ...i16(S.ergW)]); sent.erg=S.ergW; sent.t=now; sent.mode='erg';
+    }
+    return;
+  }
+  let g = state==='riding' ? route.gradeAt(dist + Math.max(v,2)*1.0) * 100 : 0; // ~1 sn ileriye bak (trainer gecikmesi)
+  g *= S.difficulty/100;
+  g = Math.round(g*10)/10;
+  const changed = sent.grade===null || sent.mode!=='sim' || Math.abs(g-sent.grade)>=0.2;
+  if((changed && now-sent.t>900) || now-sent.t>10000){
+    sendSim(g); sent.grade=g; sent.t=now; sent.mode='sim';
+  }
+}
+
+/* ========================= elle direnç önerisi ========================= */
+const res = { shown:null, cand:null, candAt:0, bannerT:null };
+const manualMode = () => S.mode==='sim' && !trainer.hasControl;
+function targetLevel(){
+  if(!route) return S.resFlat;
+  let g = route.gradeAt(dist + Math.max(v,2)*3) * 100 * S.difficulty/100;   // ~3 sn ileri: topuzu çevirmeye zaman
+  return clamp(Math.round(S.resFlat + g / S.resPerPct), 1, S.resMax);
+}
+function updateManualRes(now){
+  const on = manualMode();
+  $('tRes').style.display = on ? '' : 'none';
+  if(!on) return;
+  const lvl = targetLevel();
+  if(res.shown===null){ res.shown=lvl; }
+  else if(lvl!==res.shown){
+    if(res.cand!==lvl){ res.cand=lvl; res.candAt=now; }
+    else if(now-res.candAt>2000){                       // 2 sn kararlıysa değiştir (titremeyi önler)
+      const up = lvl>res.shown; res.shown=lvl;
+      if(state==='riding') showBanner(`${up?'▲':'▼'} Direnci ${lvl}'${datSuffix(lvl)} ${up?'çıkar':'indir'}`, up);
+    }
+  } else res.cand=null;
+  setTile('tRes', String(res.shown));
+}
+function datSuffix(n){ // Türkçe yönelme eki: 1'e, 2'ye, 6'ya, 9'a, 10'a, 20'ye, 100'e
+  if(n%10){ return ['','e','ye','e','e','e','ya','ye','e','a'][n%10]; }
+  if(n%100){ return ['','a','ye','a','a','ye','a','e','e','a'][(n/10|0)%10]; }
+  return n%1000 ? 'e' : 'e';
+}
+function showBanner(text, up){
+  const b=$('resBanner'); b.textContent=text; b.classList.toggle('down', !up); b.classList.add('show');
+  clearTimeout(res.bannerT); res.bannerT=setTimeout(()=>b.classList.remove('show'), 4000);
+}
+
+/* ========================= Bluetooth tanı ========================= */
+const hex = dv => [...new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength)].map(b=>b.toString(16).padStart(2,'0')).join(' ');
+const shortU = u => /^0000([0-9a-f]{4})-0000-1000-8000-00805f9b34fb$/.test(u) ? '0x'+u.slice(4,8) : u;
+const KNOWN = {'0x1826':'FTMS','0x1818':'Cycling Power','0x1816':'Speed & Cadence','0x180d':'Heart Rate','0x180a':'Device Info','0x180f':'Battery',
+  '0x2ad2':'Indoor Bike Data','0x2ad9':'FTMS Control Point','0x2acc':'FTMS Feature','0x2a63':'Power Measurement','0x2a5b':'CSC Measurement','0x2a37':'HR Measurement',
+  '0x2a29':'Üretici','0x2a24':'Model','0x2a26':'Firmware','0x2a19':'Pil %'};
+async function runDiag(){
+  if(!navigator.bluetooth){ toast('Web Bluetooth yok.'); return; }
+  const out=$('diag'); out.style.display='block'; out.textContent='Cihaz seç… (pedal çevirmeye devam et)\n';
+  const log = s => { out.textContent += s+'\n'; out.scrollTop=out.scrollHeight; };
+  const opt=[0x1826,0x1818,0x1816,0x180d,0x180a,0x180f,0xfff0,0xffe0,0xffe5,0xfee0,0xfee7,0xffb0,0xfd00,0xfe00,0xffc0,0xfff6,0xae00,
+    '6e400001-b5a3-f393-e0a9-e50e24dcca9e','49535343-fe7d-4ae5-8fa9-9fafd205e455'];
+  try{
+    const dev = await navigator.bluetooth.requestDevice({acceptAllDevices:true, optionalServices:opt});
+    log(`Cihaz: ${dev.name||'(isimsiz)'}`);
+    const srv = await dev.gatt.connect();
+    const svcs = await srv.getPrimaryServices();
+    const subs=[];
+    for(const s of svcs){
+      const su=shortU(s.uuid); log(`\n■ Servis ${su} ${KNOWN[su]||''}`);
+      let chars=[]; try{ chars=await s.getCharacteristics(); }catch(e){}
+      for(const c of chars){
+        const cu=shortU(c.uuid), p=c.properties;
+        const props=['read','write','writeWithoutResponse','notify','indicate'].filter(k=>p[k]).join(',');
+        let val='';
+        if(p.read){ try{ const dv=await c.readValue(); val = s.uuid.includes('180a') ? ' = "'+new TextDecoder().decode(dv).replace(/\0/g,'')+'"' : ' = '+hex(dv); }catch(e){} }
+        log(`  · ${cu} ${KNOWN[cu]||''} [${props}]${val}`);
+        if(p.notify||p.indicate) subs.push(c);
+      }
+    }
+    if(subs.length){
+      log('\n▶ 8 sn bildirim dinleniyor (pedal çevir, topuzu biraz çevir)…');
+      const cnt=new Map();
+      for(const c of subs){
+        cnt.set(c,0);
+        c.addEventListener('characteristicvaluechanged', e=>{ const n=cnt.get(c)+1; cnt.set(c,n); if(n<=6) log(`  ${shortU(c.uuid)}: ${hex(e.target.value)}`); });
+        try{ await c.startNotifications(); }catch(e){ log(`  ${shortU(c.uuid)}: abone olunamadı`); }
+      }
+      await new Promise(r=>setTimeout(r,8000));
+      for(const [c,n] of cnt) log(`  toplam ${shortU(c.uuid)}: ${n} paket`);
+    }
+    dev.gatt.disconnect(); log('\nBitti.');
+    $('btnDiagCopy').style.display='';
+  }catch(e){ if(e.name!=='NotFoundError') log('Hata: '+e.message); }
+}
+$('btnDiag').addEventListener('click', runDiag);
+$('btnDiagCopy').addEventListener('click', async ()=>{
+  try{ await navigator.clipboard.writeText($('diag').textContent); toast('Kopyalandı — bana yapıştır'); }catch(e){ toast('Kopyalanamadı; metni seçip kopyala'); }
+});
+
+/* ========================= rota ========================= */
+let route=null;
+const R_EARTH=6371008.8;
+function hav(a,b){
+  const toR=Math.PI/180, dLat=(b.lat-a.lat)*toR, dLon=(b.lon-a.lon)*toR;
+  const s=Math.sin(dLat/2)**2 + Math.cos(a.lat*toR)*Math.cos(b.lat*toR)*Math.sin(dLon/2)**2;
+  return 2*R_EARTH*Math.asin(Math.min(1,Math.sqrt(s)));
+}
+function makeRoute(pts, opts){
+  // pts: [{d, ele, t?, lat?, lon?}] d artan
+  const n=pts.length;
+  // yükseklik yumuşatma: ±25 m pencere ortalaması
+  const W=25; let lo=0, hi=0, sum=0; const sm=new Array(n);
+  for(let i=0;i<n;i++){
+    while(hi<n && pts[hi].d <= pts[i].d+W){ sum+=pts[hi].ele; hi++; }
+    while(pts[lo].d < pts[i].d-W){ sum-=pts[lo].ele; lo++; }
+    sm[i]=sum/(hi-lo);
+  }
+  pts.forEach((p,i)=>p.es=sm[i]);
+  const total=pts[n-1].d;
+  const idx = d => { // pts[i].d <= d < pts[i+1].d
+    if(d<=0) return 0; if(d>=total) return n-2;
+    let a=0,b=n-1; while(b-a>1){ const m=(a+b)>>1; if(pts[m].d<=d) a=m; else b=m; } return a;
+  };
+  const interp = (d,key) => {
+    d=clamp(d,0,total); const i=idx(d), p=pts[i], q=pts[i+1]||p;
+    const span=q.d-p.d; const f= span>0 ? (d-p.d)/span : 0;
+    return p[key] + (q[key]-p[key])*f;
+  };
+  const r = {
+    pts, total, hasTime:!!opts.hasTime, hasGeo:!!opts.hasGeo, synthetic:!!opts.synthetic, name:opts.name||'',
+    eleAt: d=>interp(d,'es'),
+    gradeAt(d){
+      if(opts.constGrade!==undefined) return opts.constGrade;
+      const h=20, a=clamp(d-h,0,total), b=clamp(d+h,0,total);
+      if(b-a<1) return 0;
+      return clamp((interp(b,'es')-interp(a,'es'))/(b-a), -0.25, 0.25);
+    },
+    latLonAt: d => r.hasGeo ? {lat:interp(d,'lat'), lon:interp(d,'lon')} : null,
+    videoSpan: null, // GPX'te zaman yoksa videonun süresine yayılır
+    timeAt(d){
+      if(r.hasTime) return interp(d,'t');
+      const span = r.videoSpan || (total/ (25/3.6));
+      return clamp(d,0,total)/total*span;
+    },
+    recSpeedAt(d){ // videonun bu noktadaki çekim hızı (m/s)
+      const h=15, a=clamp(d-h,0,total), b=clamp(d+h,0,total);
+      const dt=r.timeAt(b)-r.timeAt(a);
+      const avg = total / Math.max(1, r.timeAt(total)-r.timeAt(0));
+      if(dt<=0.05) return avg;
+      return clamp((b-a)/dt, 0.5, 40);
+    }
+  };
+  let asc=0; for(let i=1;i<n;i++){ const de=pts[i].es-pts[i-1].es; if(de>0) asc+=de; }
+  r.ascent=asc;
+  let mn=Infinity,mx=-Infinity; pts.forEach(p=>{ mn=Math.min(mn,p.es); mx=Math.max(mx,p.es); });
+  r.minEle=mn; r.maxEle=mx;
+  return r;
+}
+function parseGPX(text, name){
+  const xml=new DOMParser().parseFromString(text,'application/xml');
+  if(xml.getElementsByTagName('parsererror').length) throw new Error('GPX okunamadı');
+  let nodes=[...xml.getElementsByTagName('trkpt')];
+  if(!nodes.length) nodes=[...xml.getElementsByTagName('rtept')];
+  if(nodes.length<2) throw new Error('GPX içinde nokta bulunamadı');
+  const raw = nodes.map(nd=>{
+    const e=nd.getElementsByTagName('ele')[0], t=nd.getElementsByTagName('time')[0];
+    return { lat:parseFloat(nd.getAttribute('lat')), lon:parseFloat(nd.getAttribute('lon')),
+      ele: e ? parseFloat(e.textContent) : NaN, time: t ? Date.parse(t.textContent.trim()) : NaN };
+  }).filter(p=>isFinite(p.lat)&&isFinite(p.lon));
+  const hasEle = raw.some(p=>isFinite(p.ele));
+  let lastEle = 0; raw.forEach(p=>{ if(isFinite(p.ele)) lastEle=p.ele; else p.ele=lastEle; });
+  const hasTime = raw.every(p=>isFinite(p.time)) && raw[raw.length-1].time > raw[0].time;
+  const pts=[]; let d=0, t0=raw[0].time;
+  for(let i=0;i<raw.length;i++){
+    const p=raw[i];
+    if(i>0){ const dd=hav(raw[i-1],p); if(dd<0.3 && i<raw.length-1) continue; d+=dd; }
+    const q={ d, ele:p.ele, lat:p.lat, lon:p.lon };
+    if(hasTime){
+      q.t=(p.time-t0)/1000;
+      if(pts.length && q.t<=pts[pts.length-1].t) { // zaman ilerlemediyse (GPS duraklaması) son noktayı güncelle
+        if(q.d===pts[pts.length-1].d) continue;
+        q.t = pts[pts.length-1].t + 0.05;
+      }
+    }
+    if(pts.length && q.d<=pts[pts.length-1].d) continue;
+    pts.push(q);
+  }
+  if(pts.length<2) throw new Error('GPX çok kısa');
+  const r = makeRoute(pts, {hasTime, hasGeo:true, name});
+  r.hasEle=hasEle;
+  return r;
+}
+function buildSyntheticRoute(){
+  if(!vid.duration) return;
+  const span = Math.max(1, vid.duration - S.offset);
+  const total = span * S.noGpxSpeed/3.6;
+  const g = S.noGpxGrade/100;
+  const pts=[{d:0,ele:0,t:0},{d:total,ele:total*g,t:span}];
+  route = makeRoute(pts, {hasTime:true, synthetic:true, constGrade:g, name:'Video'});
+  onRouteReady();
+}
+
+/* ========================= video (dosya veya YouTube) ========================= */
+// Senkron kodu tek bir arayüz görür; altta yerel <video> ya da YouTube oynatıcısı çalışır.
+const vidEl=$('vid');
+let videoUrl=null, media='none', yt=null, ytReady=false, ytRates=[0.25,0.5,0.75,1,1.25,1.5,1.75,2], ytWanted=1, ytApplied=1;
+const vid = {
+  dataset:{ name:'' },
+  get src(){ return media!=='none'; },
+  get duration(){ return media==='file' ? (vidEl.duration||0) : (ytReady ? yt.getDuration()||0 : 0); },
+  get currentTime(){ return media==='file' ? vidEl.currentTime : (ytReady ? yt.getCurrentTime()||0 : 0); },
+  set currentTime(t){ if(media==='file') vidEl.currentTime=t; else if(ytReady) yt.seekTo(t,true); },
+  get paused(){ if(media==='file') return vidEl.paused; if(!ytReady) return true; const s=yt.getPlayerState(); return !(s===1||s===3); },
+  get seeking(){ return media==='file' ? vidEl.seeking : (ytReady && yt.getPlayerState()===3); },
+  get readyState(){ return media==='file' ? vidEl.readyState : (ytReady ? 4 : 0); },
+  get playbackRate(){ return media==='file' ? vidEl.playbackRate : ytWanted; },
+  set playbackRate(r){
+    if(media==='file'){ vidEl.playbackRate=r; return; }
+    if(!ytReady) return;
+    ytWanted=r;   // YouTube yalnızca belirli hızları kabul eder → en yakını; kalan fark kayma düzeltmesiyle dengelenir
+    const q=ytRates.reduce((a,b)=>Math.abs(b-r)<Math.abs(a-r)?b:a);
+    if(q!==ytApplied){ yt.setPlaybackRate(q); ytApplied=q; }
+  },
+  get minRate(){ return media==='yt' ? Math.min(...ytRates) : 0.1; },
+  play(){ if(media==='file') return vidEl.play(); if(ytReady) yt.playVideo(); return Promise.resolve(); },
+  pause(){ if(media==='file') vidEl.pause(); else if(ytReady) yt.pauseVideo(); }
+};
+// Videoyu ekranı dolduracak şekilde yerleştir; alttaki S.cropBottom yüzdesini ekran dışına it
+function layoutMedia(){
+  const W=window.innerWidth, H=window.innerHeight, k=clamp(S.cropBottom,0,40)/100;
+  let ar = 16/9;
+  if(media==='file' && vidEl.videoWidth) ar = vidEl.videoWidth/vidEl.videoHeight;
+  const ih = Math.max(H/(1-k), W/ar), iw = ih*ar;
+  const top = H - ih*(1-k), left = (W-iw)/2;
+  const box = el => { el.style.width=iw+'px'; el.style.height=ih+'px'; el.style.top=top+'px'; el.style.left=left+'px'; };
+  if(media==='file'){ vidEl.classList.add('cropped'); box(vidEl); }
+  const f=$('ytWrap').querySelector('iframe'); if(f) box(f);
+}
+window.addEventListener('resize', layoutMedia);
+$('cropBottom').value=S.cropBottom; $('cropV').textContent=S.cropBottom+'%';
+$('cropBottom').addEventListener('input', e=>{ S.cropBottom=+e.target.value; $('cropV').textContent=S.cropBottom+'%'; saveS(); layoutMedia(); });
+function showMedia(kind){
+  media=kind;
+  $('noVideo').style.display = kind==='none' ? '' : 'none';
+  vidEl.style.display = kind==='file' ? '' : 'none';
+  $('ytWrap').style.display = kind==='yt' ? 'block' : 'none';
+}
+function onMediaMeta(){
+  layoutMedia();
+  if(!route || route.synthetic) buildSyntheticRoute();
+  else { route.videoSpan = Math.max(1, vid.duration - S.offset); onRouteReady(); }
+  vid.currentTime = clamp(S.offset,0,vid.duration-0.1);
+  if(state!=='riding') vid.pause();
+}
+function dropYoutube(){ if(yt){ try{ yt.destroy(); }catch(e){} yt=null; } ytReady=false; $('ytWrap').innerHTML='<div id="yt"></div>'; }
+
+$('fVideo').addEventListener('change', e=>{
+  const f=e.target.files[0]; if(!f) return;
+  libSel=null; $('libInfo').style.display='none'; renderLib();
+  dropYoutube();
+  if(videoUrl) URL.revokeObjectURL(videoUrl);
+  videoUrl=URL.createObjectURL(f); vidEl.src=videoUrl; vidEl.load();
+  showMedia('file'); vid.dataset.name=f.name;
+});
+vidEl.addEventListener('loadedmetadata', ()=>{ if(media==='file') onMediaMeta(); });
+vidEl.addEventListener('error', ()=>{ if(media==='file') toast('Video oynatılamadı. MP4 (H.264) dene.'); });
+
+function loadYtApi(){
+  return new Promise((res,rej)=>{
+    if(window.YT && YT.Player) return res();
+    window.onYouTubeIframeAPIReady=()=>res();
+    const s=document.createElement('script'); s.src='https://www.youtube.com/iframe_api';
+    s.onerror=()=>rej(new Error('YouTube yüklenemedi — internet bağlantısını kontrol et.'));
+    document.head.appendChild(s);
+  });
+}
+function parseYtId(u){
+  u=(u||'').trim();
+  const m=u.match(/(?:[?&]v=|youtu\.be\/|\/shorts\/|\/embed\/|\/live\/)([\w-]{11})/);
+  return m ? m[1] : (/^[\w-]{11}$/.test(u) ? u : null);
+}
+async function loadYoutube(){
+  const id=parseYtId($('ytUrl').value);
+  if(!id){ toast('Geçerli bir YouTube linki değil.'); return; }
+  try{ await loadYtApi(); }catch(e){ toast(e.message); return; }
+  if(media==='file'){ vidEl.pause(); vidEl.removeAttribute('src'); vidEl.load(); }
+  dropYoutube(); showMedia('yt');
+  $('stRoute').textContent='YouTube videosu yükleniyor…'; $('stRoute').className='status';
+  yt = new YT.Player('yt', {
+    videoId:id, width:'100%', height:'100%',
+    playerVars:{ controls:0, disablekb:1, modestbranding:1, playsinline:1, rel:0, iv_load_policy:3, fs:0, mute:1 },
+    events:{
+      onReady:()=>{
+        yt.mute();
+        try{ const r=yt.getAvailablePlaybackRates(); if(r && r.length) ytRates=r; }catch(e){}
+        ytApplied=1; ytWanted=1;
+        let tries=0;
+        const wait=()=>{
+          const d=yt.getDuration();
+          if(d>0){
+            ytReady=true;
+            vid.dataset.name = (yt.getVideoData && yt.getVideoData().title) || 'YouTube';
+            onMediaMeta();
+          } else {
+            tries++; if(tries===6) yt.playVideo();      // bazı videolarda süre ancak oynatınca gelir
+            if(tries<60) setTimeout(wait,300); else toast('YouTube videosunun süresi alınamadı.');
+          }
+        };
+        wait();
+      },
+      onError:e=>{
+        const msg = (e.data===101||e.data===150) ? 'Bu videonun sahibi başka sitelerde oynatılmasına izin vermiyor — başka video dene.'
+                  : e.data===100 ? 'Video bulunamadı (silinmiş ya da gizli).' : 'YouTube oynatma hatası ('+e.data+').';
+        toast(msg, 5000); $('stRoute').textContent=msg; $('stRoute').className='status bad';
+      }
+    }
+  });
+}
+$('btnYt').addEventListener('click', ()=>manualYoutube());
+
+/* ========================= rota kütüphanesi ========================= */
+// Kaynak: YouTube @IndoorCyclingVideos — açıklamalardaki "without Speed Display" sürümleri.
+// kmh/g: tahmini çekim hızı ve ortalama eğim (GPX yokken sabit hız modu için).
+const LIB = [
+  {id:'DhKoQBYXS-k', t:'Val Martello → Plaus', p:'Güney Tirol, İtalya', min:91, type:'yol',      kmh:24, g:1, strava:'https://www.strava.com/activities/18880044604', src:'EWj9kUZTv6c'},
+  {id:'xO-HFJJFNEc', t:'Güneşli Alp sürüşü',   p:'Alpler, İtalya',      min:30, type:'yol',      kmh:22, g:2},
+  {id:'6tQj5YmqNC0', t:'Ahrntal vadisi',        p:'Alpler, İtalya',      min:null,type:'yol',     kmh:22, g:2},
+  {id:'paxnmv9M3fk', t:'Güneşli Almanya turu',  p:'Almanya',             min:30, type:'yol',      kmh:27, g:1},
+  {id:'G9nMa6j3f18', t:'Bahar Klasikleri',      p:'Boş küçük yollar',    min:80, type:'yol',      kmh:28, g:1},
+  {id:'pUZ2wodSFH4', t:'Bahar Klasikleri #2',   p:'Boş küçük yollar',    min:30, type:'yol',      kmh:28, g:1},
+  {id:'jxSPERwY18o', t:'Grup sürüşü',           p:'Saarland, Almanya',   min:30, type:'yol',      kmh:30, g:0.5},
+  {id:'x_jnxr7ZUOc', t:'Grup sürüşü (uzun)',    p:'Saarland, Almanya',   min:40, type:'yol',      kmh:30, g:0.5},
+  {id:'3k7roO9sJPM', t:'Yağ yakımı sürüşü',     p:'Almanya',             min:60, type:'yol',      kmh:27, g:1},
+  {id:'Oc0CoON2NmU', t:'Ekstra uzun sürüş',     p:'Saarland, Almanya',   min:null,type:'yol',     kmh:27, g:1},
+  {id:'J84ssUaNAo8', t:'Dolomitler tırmanışı',  p:'Dolomitler, İtalya',  min:60, type:'tirmanis', kmh:13, g:6},
+  {id:'lLt5c8e3krs', t:'K2\'ye tırmanış (2410 m)',p:'Alpler, İtalya',    min:30, type:'tirmanis', kmh:8,  g:10},
+  {id:'6poPYuDlLis', t:'Vinschgau MTB',         p:'Güney Tirol, İtalya', min:30, type:'mtb',      kmh:15, g:3},
+  {id:'VCQ1dhaAMQ0', t:'Ahrntal MTB',           p:'Alpler, İtalya',      min:25, type:'mtb',      kmh:15, g:3},
+  {id:'EfEr7jHfi44', t:'Ahrntal MTB #2',        p:'Alpler, İtalya',      min:30, type:'mtb',      kmh:15, g:3},
+  {id:'BayFeVrX2MY', t:'Güneşli Alp MTB',       p:'Alpler, İtalya',      min:30, type:'mtb',      kmh:15, g:3},
+  {id:'gJZ9OVE85Go', t:'Kaprun MTB',            p:'Kaprun, Avusturya',   min:60, type:'mtb',      kmh:15, g:3},
+];
+const TYPE_TR = { yol:['Düz yol','#3ecf8e'], tirmanis:['Tırmanış','#ff6a2b'], mtb:['MTB','#c8a24a'] };
+let libFilter='all', libSel=null;
+
+// Videoya bağlı GPX'leri tarayıcıda sakla (IndexedDB — büyük GPX'ler localStorage'a sığmaz)
+const gpxDB = {
+  db:null,
+  open(){ return this.db ? Promise.resolve(this.db) : new Promise((res,rej)=>{
+    const r=indexedDB.open('pedalla',1);
+    r.onupgradeneeded=()=>r.result.createObjectStore('gpx');
+    r.onsuccess=()=>{ this.db=r.result; res(this.db); }; r.onerror=()=>rej(r.error); }); },
+  async get(k){ try{ const db=await this.open(); return await new Promise(res=>{ const q=db.transaction('gpx').objectStore('gpx').get(k); q.onsuccess=()=>res(q.result||null); q.onerror=()=>res(null); }); }catch(e){ return null; } },
+  async set(k,v){ try{ const db=await this.open(); await new Promise(res=>{ const tx=db.transaction('gpx','readwrite'); tx.objectStore('gpx').put(v,k); tx.oncomplete=res; tx.onerror=res; }); }catch(e){} },
+  async keys(){ try{ const db=await this.open(); return await new Promise(res=>{ const q=db.transaction('gpx').objectStore('gpx').getAllKeys(); q.onsuccess=()=>res(q.result||[]); q.onerror=()=>res([]); }); }catch(e){ return []; } }
+};
+let savedGpx = new Set();
+gpxDB.keys().then(k=>{ savedGpx=new Set(k); renderLib(); });
+async function saveGpxForSelected(text, name){
+  if(!libSel) return;
+  await gpxDB.set(libSel, {text, name, offset:S.offset});
+  savedGpx.add(libSel); renderLib(); toast('GPX bu videoya kaydedildi — bir dahakine otomatik gelecek');
+}
+async function saveOffsetForSelected(){
+  if(!libSel || !savedGpx.has(libSel)) return;
+  const r=await gpxDB.get(libSel); if(r){ r.offset=S.offset; gpxDB.set(libSel, r); }
+}
+function showLibInfo(x){
+  const el=$('libInfo'); el.style.display=''; el.innerHTML='';
+  const add=(txt,href)=>{ if(href){ const a=document.createElement('a'); a.href=href; a.target='_blank'; a.rel='noopener'; a.textContent=txt; a.style.color='var(--acc)'; el.appendChild(a); } else el.appendChild(document.createTextNode(txt)); };
+  if(savedGpx.has(x.id)){ add('✓ Bu video için kayıtlı GPX kullanılıyor. '); }
+  else {
+    add('Gerçek eğim için: ');
+    if(x.strava) add('Strava kaydını aç', x.strava);
+    else add('videonun açıklamasındaki Strava linkini aç', 'https://www.youtube.com/watch?v='+(x.src||x.id));
+    add(' → ⋯ menüsünden GPX indir (ya da rota oluşturup dışa aktar) → “GPX seç”.');
+  }
+}
+function renderLib(){
+  const box=$('lib'); box.innerHTML='';
+  LIB.filter(x=>libFilter==='all'||x.type===libFilter).forEach(x=>{
+    const b=document.createElement('button'); b.className='rc'+(libSel===x.id?' sel':'');
+    const [tn,tc]=TYPE_TR[x.type];
+    b.innerHTML=`<div class="th" style="background-image:url('https://i.ytimg.com/vi/${x.id}/mqdefault.jpg')">
+        <i style="color:${tc}">${tn}</i>${savedGpx.has(x.id)?'<i style="left:auto;right:6px;color:#3ecf8e">GPX ✓</i>':''}${x.min?`<span>${x.min} dk</span>`:''}</div>
+      <div class="bd"><div class="t1"></div><div class="t2"></div></div>`;
+    b.querySelector('.t1').textContent=x.t;
+    b.querySelector('.t2').textContent=`${x.p} · ~${x.kmh} km/s · %${x.g}`;
+    b.addEventListener('click', ()=>pickLib(x));
+    box.appendChild(b);
+  });
+}
+async function pickLib(x){
+  libSel=x.id;
+  S.noGpxSpeed=x.kmh; S.noGpxGrade=x.g; S.offset=0; S.cropBottom=0;
+  if(state!=='idle') resetRide();
+  route=null;                                     // başka sürüşün GPX'i kalmasın
+  const saved = await gpxDB.get(x.id);
+  if(saved){ try{ route=parseGPX(saved.text, saved.name); S.offset=saved.offset||0; }catch(e){ route=null; } }
+  saveS();
+  $('noGpxSpeed').value=x.kmh; $('noGpxGrade').value=x.g; $('offset').value=S.offset;
+  $('cropBottom').value=0; $('cropV').textContent='0%';
+  $('ytUrl').value='https://youtu.be/'+x.id;
+  renderLib(); showLibInfo(x); loadYoutube();
+}
+document.querySelectorAll('#libSeg button').forEach(b=>b.addEventListener('click', ()=>{
+  libFilter=b.dataset.f; document.querySelectorAll('#libSeg button').forEach(o=>o.classList.toggle('on',o===b)); renderLib();
+}));
+renderLib();
+$('ytUrl').addEventListener('keydown', e=>{ if(e.key==='Enter') manualYoutube(); });
+function manualYoutube(){ libSel=null; $('libInfo').style.display='none'; renderLib(); loadYoutube(); }
+
+$('fGpx').addEventListener('change', async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  try{
+    const text = await f.text();
+    route = parseGPX(text, f.name);
+    if(vid.duration) route.videoSpan = Math.max(1, vid.duration - S.offset);
+    onRouteReady();
+    if(libSel){ await saveGpxForSelected(text, f.name); const x=LIB.find(i=>i.id===libSel); if(x) showLibInfo(x); }
+  }catch(err){ toast(err.message); }
+  e.target.value='';
+});
+
+function onRouteReady(){
+  dist=0; ascent=0; lastEle=null;
+  const info=[];
+  info.push(`${(route.total/1000).toFixed(2)} km`, `+${Math.round(route.ascent)} m`);
+  if(route.synthetic) info.push('GPX yok · sabit hız varsayımı');
+  else info.push(route.hasTime ? 'GPX zamanlı ✓' : 'GPX zamansız (videoya yayıldı)');
+  if(vid.dataset.name) info.push('🎬 '+vid.dataset.name);
+  const st=$('stRoute'); st.textContent=info.join(' · '); st.className='status ok';
+  $('noGpxBox').style.display = route.synthetic ? '' : 'none';
+  const note=$('routeNote'); note.style.display='none';
+  if(!route.synthetic && route.hasTime && vid.duration){
+    const gpxSpan=route.timeAt(route.total), vidSpan=vid.duration-S.offset;
+    if(Math.abs(gpxSpan-vidSpan)/vidSpan > 0.1){
+      note.style.display='';
+      note.textContent=`GPX süresi ${fmtTime(gpxSpan)}, video ${fmtTime(vidSpan)}. Aynı çekime ait olduklarından emin ol veya başlangıç ofsetini ayarla.`;
+    }
+  }
+  if(!route.synthetic && !route.hasEle) { note.style.display=''; note.textContent='GPX\'te yükseklik verisi yok — rota düz sayılacak.'; }
+  drawProfileBase(); updateHud(true);
+  doneIdx=-1; setupMinimap();
+}
+
+/* ========================= mini harita ========================= */
+let map=null, mapLine=null, mapDone=null, mapMarker=null, mapFollow=true, lastMapPan=0;
+function setupMinimap(){
+  const el=$('minimap');
+  if(!window.L || !route || !route.hasGeo){ el.style.display='none'; return; }
+  el.style.display='block';
+  if(!map){
+    map=L.map(el,{zoomControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false,boxZoom:false,keyboard:false,tap:false});
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+    el.addEventListener('click', ()=>{ mapFollow=!mapFollow; if(!mapFollow) map.fitBounds(mapLine.getBounds(),{padding:[12,12]}); else lastMapPan=0; });
+  }
+  [mapLine,mapDone,mapMarker].forEach(x=>x&&x.remove());
+  const ll=route.pts.map(p=>[p.lat,p.lon]);
+  mapLine=L.polyline(ll,{color:'#ff6a2b',weight:5,opacity:.9}).addTo(map);
+  mapDone=L.polyline([],{color:'#7d8794',weight:5,opacity:.95}).addTo(map);
+  mapMarker=L.circleMarker(ll[0],{radius:7,color:'#fff',weight:3,fillColor:'#ff6a2b',fillOpacity:1}).addTo(map);
+  map.invalidateSize(); map.setView(ll[0],16);
+}
+let doneIdx=0;
+function updateMinimap(now){
+  if(!map || !route || !route.hasGeo) return;
+  const p=route.latLonAt(dist); mapMarker.setLatLng([p.lat,p.lon]);
+  if(now-lastMapPan>1000){
+    lastMapPan=now;
+    // geçilen kısmı griye boya
+    let i=0; while(i<route.pts.length-1 && route.pts[i+1].d<=dist) i++;
+    if(i!==doneIdx){ doneIdx=i; mapDone.setLatLngs(route.pts.slice(0,i+1).map(q=>[q.lat,q.lon]).concat([[p.lat,p.lon]])); }
+    if(mapFollow) map.panTo([p.lat,p.lon],{animate:true,duration:.8});
+  }
+}
+
+/* ========================= profil çizimi ========================= */
+const cv=$('profile'), ctx=cv.getContext('2d');
+let base=null;
+function gradeColor(g){ // g yüzde
+  if(g< -2) return '#4aa3ff';
+  if(g< 2)  return '#3ecf8e';
+  if(g< 5)  return '#c8d93a';
+  if(g< 8)  return '#ffb020';
+  if(g< 12) return '#ff6a2b';
+  return '#e0245e';
+}
+function drawProfileBase(){
+  const dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
+  cv.width=W*dpr; cv.height=H*dpr;
+  base=document.createElement('canvas'); base.width=cv.width; base.height=cv.height;
+  if(!route) return;
+  const b=base.getContext('2d'); b.scale(dpr,dpr);
+  const pad=6, top=8, bot=H-6;
+  const range=Math.max(30, route.maxEle-route.minEle);
+  const y = e => bot - (e-route.minEle)/range*(bot-top);
+  const x = d => pad + d/route.total*(W-2*pad);
+  const N=Math.max(50, Math.floor(W/2));
+  for(let i=0;i<N;i++){
+    const d0=route.total*i/N, d1=route.total*(i+1)/N;
+    const g=(route.eleAt(d1)-route.eleAt(d0))/(d1-d0)*100;
+    b.fillStyle=gradeColor(route.synthetic?S.noGpxGrade:g);
+    b.globalAlpha=.85;
+    b.beginPath(); b.moveTo(x(d0),bot); b.lineTo(x(d0),y(route.eleAt(d0))); b.lineTo(x(d1),y(route.eleAt(d1))); b.lineTo(x(d1),bot); b.closePath(); b.fill();
+  }
+  b.globalAlpha=1;
+}
+function drawProfile(){
+  const dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
+  if(cv.width!==Math.round(W*dpr) || cv.height!==Math.round(H*dpr)) drawProfileBase();
+  ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height);
+  if(!route||!base) return;
+  ctx.drawImage(base,0,0);
+  ctx.scale(dpr,dpr);
+  const pad=6, px=pad + dist/route.total*(W-2*pad);
+  ctx.fillStyle='rgba(0,0,0,.45)'; ctx.fillRect(pad,0,px-pad,H);       // geçilen kısım koyu
+  ctx.fillStyle='#fff'; ctx.fillRect(px-1,0,2,H);
+  const range=Math.max(30, route.maxEle-route.minEle);
+  const yy = (H-6) - (route.eleAt(dist)-route.minEle)/range*(H-14);
+  ctx.beginPath(); ctx.arc(px,yy,5,0,7); ctx.fillStyle='#ff6a2b'; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle='#fff'; ctx.stroke();
+}
+
+/* ========================= sürüş durumu ========================= */
+let state='idle'; // idle | riding | paused | done
+let v=0, dist=0, elapsed=0, ascent=0, lastEle=null, energyJ=0, maxW=0, hrSum=0, hrN=0;
+let samples=[], startTime=null, lastSampleT=0, wakeLock=null;
+
+async function keepAwake(){
+  try{ if('wakeLock' in navigator && !wakeLock){ wakeLock=await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release',()=>wakeLock=null); } }catch(e){}
+}
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && state==='riding') keepAwake(); });
+
+function start(){
+  if(!route){ toast('Önce bir video veya GPX yükle.'); return; }
+  if(state==='done') resetRide();
+  if(state==='idle'){ startTime=new Date(); samples=[]; lastSampleT=0; }
+  state='riding'; resetSent();
+  if(trainer.hasControl) cpWrite([0x07]);
+  $('panel').classList.add('hidden'); $('btnPlay').textContent='❚❚';
+  keepAwake();
+}
+function pause(){
+  if(state!=='riding') return;
+  state='paused'; v=0; vid.pause(); $('btnPlay').textContent='▶';
+  if(trainer.hasControl && S.mode==='sim'){ sendSim(0); sent.grade=0; sent.t=performance.now(); }
+}
+function resetRide(){
+  state='idle'; v=0; dist=0; elapsed=0; ascent=0; lastEle=null; energyJ=0; maxW=0; hrSum=0; hrN=0; samples=[];
+  powBuf.length=0;
+  if(vid.duration) vid.currentTime=clamp(S.offset,0,vid.duration-0.1);
+  updateHud(true);
+}
+function finish(){
+  if(state==='idle' && !samples.length){ toast('Henüz kayıt yok.'); return; }
+  state='done'; vid.pause(); $('btnPlay').textContent='▶';
+  if(trainer.hasControl && S.mode==='sim') sendSim(0);
+  if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock=null; }
+  const avgW = elapsed>0 ? energyJ/elapsed : 0;
+  $('sumStats').innerHTML = [
+    [(dist/1000).toFixed(2),'km'], [fmtTime(elapsed),'süre'], [Math.round(ascent),'m tırmanış'],
+    [Math.round(avgW),'ort. W'], [Math.round(maxW),'maks. W'], [hrN?Math.round(hrSum/hrN):'—','ort. nabız'],
+    [((dist/1000)/(Math.max(1,elapsed)/3600)).toFixed(1),'ort. km/s'], [Math.round(energyJ/1000),'kJ'], [samples.length,'kayıt noktası']
+  ].map(([a,b])=>`<div><b>${a}</b><span>${b}</span></div>`).join('');
+  $('panel').classList.add('hidden');
+  $('panelSummary').style.display='flex';
+}
+
+$('btnStart').addEventListener('click', start);
+$('btnClose').addEventListener('click', ()=>$('panel').classList.add('hidden'));
+$('btnFinish').addEventListener('click', finish);
+$('btnPanel').addEventListener('click', ()=>$('panel').classList.toggle('hidden'));
+$('btnPlay').addEventListener('click', ()=>{ state==='riding' ? pause() : start(); });
+$('btnFull').addEventListener('click', async ()=>{
+  try{
+    if(!document.fullscreenElement){ await document.documentElement.requestFullscreen(); try{ await screen.orientation.lock('landscape'); }catch(e){} }
+    else await document.exitFullscreen();
+  }catch(e){ toast('Tam ekran açılamadı'); }
+});
+$('btnTcx').addEventListener('click', downloadTcx);
+$('btnNew').addEventListener('click', ()=>{ $('panelSummary').style.display='none'; resetRide(); $('panel').classList.remove('hidden'); });
+document.addEventListener('keydown', e=>{ if(e.code==='Space' && e.target.tagName!=='INPUT'){ e.preventDefault(); state==='riding'?pause():start(); } });
+
+/* ========================= fizik + video senkron ========================= */
+function physics(dt, P){
+  if(speedMode()){                              // watt yok → bisikletin hızını yumuşatarak kullan
+    const target = Math.max(0, live.speed||0)/3.6;
+    v += (target - v) * Math.min(1, dt*2);
+    if(target===0 && v<0.2) v=0;
+    dist = Math.min(route.total, dist + v*dt);
+    return;
+  }
+  const g = route.gradeAt(dist), th=Math.atan(g);
+  const m = S.riderKg + S.bikeKg;
+  const Fg = m*9.81*(Math.sin(th) + S.crr*Math.cos(th));
+  const Fa = 0.5*1.225*S.cda*v*v;
+  const Fd = P*0.976 / Math.max(v, 1.0);           // aktarma verimi ~%97.6
+  const a  = (Fd - Fg - Fa) / (m + 1.5);            // +1.5 kg dönen kütle eşdeğeri
+  v = Math.max(0, v + a*dt);
+  if(P<=0 && g>=0 && v<0.15) v=0;
+  dist = Math.min(route.total, dist + v*dt);
+}
+let lastSeek=0;
+function syncVideo(now){
+  if(!vid.src || !vid.duration || vid.readyState<2) return;
+  const target = clamp(route.timeAt(dist) + S.offset, 0, vid.duration-0.05);
+  if(v<0.4){
+    if(!vid.paused) vid.pause();
+    if(Math.abs(vid.currentTime-target)>1.5 && !vid.seeking && now-lastSeek>1000){ vid.currentTime=target; lastSeek=now; }
+    return;
+  }
+  const diff = target - vid.currentTime;
+  if(diff < -2 && v/route.recSpeedAt(dist) < vid.minRate*1.2){   // video önde ve daha da yavaşlayamıyor → bekle
+    if(!vid.paused) vid.pause();
+    return;
+  }
+  if(Math.abs(diff)>4){
+    if(!vid.seeking && now-lastSeek>1500){ vid.currentTime=target; lastSeek=now; }
+    return;
+  }
+  let rate = v / route.recSpeedAt(dist);
+  rate *= 1 + clamp(diff*0.4, -0.6, 0.6);           // kaymayı yavaşça düzelt
+  rate = clamp(rate, 0.1, 4);
+  if(Math.abs(rate - vid.playbackRate)/vid.playbackRate > 0.03) vid.playbackRate = rate;
+  if(vid.paused) vid.play().catch(()=>{});
+}
+
+function record(now){
+  if(now - lastSampleT < 1000) return;
+  lastSampleT = now;
+  const ll=route.latLonAt(dist);
+  samples.push({ t: new Date(startTime.getTime() + elapsed*1000), d:dist, ele:route.eleAt(dist),
+    lat: ll?ll.lat:null, lon: ll?ll.lon:null, w: Math.round(currentPower()||0), cad: Math.round(currentCad()||0),
+    hr: currentHr(), v });
+}
+
+let lastFrame=performance.now(), lastHud=0;
+function loop(now){
+  const dt = Math.min(0.25, (now-lastFrame)/1000); lastFrame=now;
+  if(state==='riding' && route){
+    const P = currentPower()||0;
+    physics(dt, P);
+    elapsed += dt; energyJ += P*dt; maxW=Math.max(maxW,P);
+    const h=currentHr(); if(h){ hrSum+=h*dt; hrN+=dt; }
+    const e=route.eleAt(dist); if(lastEle!==null && e>lastEle) ascent+=e-lastEle; lastEle=e;
+    syncVideo(now);
+    record(now);
+    if(dist >= route.total - 0.5){ finish(); }
+  }
+  updateResistance(now);
+  if(now-lastHud>250){ lastHud=now; updateHud(); updateManualRes(now); updateMinimap(now); }
+  drawProfile();
+  requestAnimationFrame(loop);
+}
+
+function setTile(id, val){ const el=$(id).querySelector('.v'); const u=el.querySelector('.u');
+  el.firstChild && el.firstChild.nodeType===3 ? el.firstChild.nodeValue=val : el.insertBefore(document.createTextNode(val), u); }
+function updateHud(){
+  const P=currentPower();
+  const now=performance.now();
+  if(P!==null && P!==undefined){ powBuf.push([now,P]); }
+  while(powBuf.length && now-powBuf[0][0]>3000) powBuf.shift();
+  const p3 = powBuf.length ? powBuf.reduce((s,x)=>s+x[1],0)/powBuf.length : null;
+  setTile('tPow', p3===null ? '—' : String(Math.round(p3)));
+  const c=currentCad(); setTile('tCad', c===null||c===undefined ? '—' : String(Math.round(c)));
+  setTile('tSpd', (v*3.6).toFixed(1));
+  const h=currentHr(); setTile('tHr', h ? String(h) : '—');
+  const g = route ? route.gradeAt(dist)*100 : 0;
+  setTile('tGrade', g.toFixed(1)); $('tGrade').querySelector('.v').style.color = gradeColor(g);
+  setTile('tDist', (dist/1000).toFixed(2));
+  setTile('tTime', fmtTime(elapsed));
+  setTile('tAsc', String(Math.round(ascent)));
+  if(route){
+    const left=route.total-dist, ahead=Math.min(500,left);
+    const ga = ahead>20 ? (route.eleAt(dist+ahead)-route.eleAt(dist))/ahead*100 : 0;
+    const trainerG = S.mode==='erg' ? `ERG ${S.ergW} W` : manualMode() ? `topuz ${res.shown??S.resFlat}/${S.resMax}` : `trainer %${(g*S.difficulty/100).toFixed(1)}`;
+    $('profInfo').textContent = `Kalan ${(left/1000).toFixed(2)} km · sonraki ${Math.round(ahead)} m ort. %${ga.toFixed(1)} · ${trainerG}`;
+  }
+}
+
+/* ========================= TCX dışa aktarma ========================= */
+function esc(s){ return String(s).replace(/[<>&"]/g, c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
+function buildTcx(){
+  const st = startTime || new Date();
+  const tps = samples.map(s=>{
+    let x = `<Trackpoint><Time>${s.t.toISOString()}</Time>`;
+    if(s.lat!==null) x += `<Position><LatitudeDegrees>${s.lat.toFixed(7)}</LatitudeDegrees><LongitudeDegrees>${s.lon.toFixed(7)}</LongitudeDegrees></Position>`;
+    x += `<AltitudeMeters>${s.ele.toFixed(1)}</AltitudeMeters><DistanceMeters>${s.d.toFixed(1)}</DistanceMeters>`;
+    if(s.hr) x += `<HeartRateBpm><Value>${s.hr}</Value></HeartRateBpm>`;
+    x += `<Cadence>${clamp(s.cad,0,254)}</Cadence>`;
+    x += `<Extensions><ns3:TPX><ns3:Speed>${s.v.toFixed(2)}</ns3:Speed><ns3:Watts>${s.w}</ns3:Watts></ns3:TPX></Extensions></Trackpoint>`;
+    return x;
+  }).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2" xmlns:ns3="http://www.garmin.com/xmlschemas/ActivityExtension/v2">
+<Activities><Activity Sport="Biking"><Id>${st.toISOString()}</Id>
+<Lap StartTime="${st.toISOString()}"><TotalTimeSeconds>${elapsed.toFixed(0)}</TotalTimeSeconds><DistanceMeters>${dist.toFixed(1)}</DistanceMeters>
+<Calories>${Math.round(energyJ/1000)}</Calories><Intensity>Active</Intensity><TriggerMethod>Manual</TriggerMethod>
+<Track>
+${tps}
+</Track></Lap>
+<Notes>${esc('Pedalla · '+(route&&route.name?route.name:'video rota'))}</Notes>
+</Activity></Activities></TrainingCenterDatabase>`;
+}
+function downloadTcx(){
+  if(!samples.length){ toast('Kayıt yok'); return; }
+  const blob=new Blob([buildTcx()],{type:'application/vnd.garmin.tcx+xml'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  const st=startTime||new Date();
+  a.download=`pedalla-${st.toISOString().slice(0,16).replace(/[:T]/g,'-')}.tcx`;
+  document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+
+window.addEventListener('resize', ()=>drawProfileBase());
+updateHud();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
