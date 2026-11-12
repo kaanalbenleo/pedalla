@@ -589,7 +589,8 @@ async function resTest(){
 
 /* ========================= elle direnç önerisi ========================= */
 const res = { shown:null, cand:null, candAt:0, bannerT:null };
-const manualMode = () => S.mode==='sim' && !(trainer.hasControl && trainer.sup && (trainer.sup.sim || trainer.sup.res));
+// Bisiklet direnci gerçekten kendisi ayarlamıyorsa (ya da yalnızca tahminen deniyorsak) topuz önerisini göster
+const manualMode = () => S.mode==='sim' && !(trainer.hasControl && trainer.sup && (trainer.sup.sim || (trainer.sup.res && !trainer.sup.guess)));
 function targetLevel(){
   if(!route) return S.resFlat;
   let g = route.gradeAt(dist + Math.max(v,2)*3) * 100 * S.difficulty/100;   // ~3 sn ileri: topuzu çevirmeye zaman
