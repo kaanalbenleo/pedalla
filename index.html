@@ -44,7 +44,17 @@
     box-shadow:0 6px 24px rgba(0,0,0,.45);display:none;z-index:3;background:#1b2128}
   #minimap .leaflet-control-attribution{font-size:8px;background:rgba(0,0,0,.4);color:#ccc}
   #minimap .leaflet-control-attribution a{color:#ccc}
-  @media (max-height:480px){ #minimap{width:170px;height:120px} }
+  @media (max-height:520px){
+    #minimap{width:150px;height:96px;bottom:calc(128px + env(safe-area-inset-bottom))}
+    #hud{gap:5px;padding-top:calc(env(safe-area-inset-top) + 6px);flex-wrap:nowrap;justify-content:flex-start;
+      padding-left:8px;padding-right:76px;overflow:hidden}
+    .tile{min-width:0;flex:1 1 0;padding:4px 6px 5px;border-radius:10px}
+    .tile .k{font-size:9px;letter-spacing:.4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .tile .v{font-size:22px} .tile.big .v{font-size:28px} .tile.big{min-width:0}
+    .tile .u{font-size:10px}
+    #fab{bottom:calc(104px + env(safe-area-inset-bottom))} #fab button{width:46px;height:46px;font-size:19px}
+    #resBanner{font-size:24px;top:45%}
+  }
   #resBanner{position:fixed;left:50%;top:38%;transform:translate(-50%,-50%) scale(.9);z-index:4;
     padding:16px 28px;border-radius:18px;font-size:34px;font-weight:800;color:#fff;letter-spacing:.3px;
     background:rgba(255,106,43,.92);box-shadow:0 10px 40px rgba(0,0,0,.5);opacity:0;pointer-events:none;
@@ -227,6 +237,7 @@
         <h2>Sürücü</h2>
         <div class="row"><label>Kilon (kg)</label><input type="number" id="riderKg" step="0.5" min="30"></div>
         <div class="row"><label>Bisiklet (kg)</label><input type="number" id="bikeKg" step="0.5" min="3"></div>
+        <div class="row"><label>Kadanstan hız (km/s / rpm) — bisiklet hız/watt göndermiyorsa; 0.3 → 90 rpm ≈ 27 km/s</label><input type="number" id="kmhPerRpm" step="0.01" min="0.05"></div>
         <div class="row"><label>CdA (m²) — 0.25 aero · 0.32 drop · 0.40 dik</label><input type="number" id="cda" step="0.01" min="0.15"></div>
       </div>
     </div>
@@ -264,7 +275,7 @@ let toastT; function toast(msg, ms=3500){ const t=$('toast'); t.textContent=msg;
 
 /* ========================= ayarlar ========================= */
 const DEF = { riderKg:75, bikeKg:9, cda:0.32, crr:0.004, difficulty:50, mode:'sim', ergW:150,
-  offset:0, noGpxSpeed:25, noGpxGrade:0, demoW:0, resMax:10, resFlat:3, resPerPct:2, cropBottom:0 };
+  offset:0, noGpxSpeed:25, noGpxGrade:0, demoW:0, resMax:10, resFlat:3, resPerPct:2, cropBottom:0, kmhPerRpm:0.3 };
 const S = Object.assign({}, DEF);
 try { Object.assign(S, JSON.parse(localStorage.getItem('pedalla.settings')||'{}')); } catch(e){}
 function saveS(){ try{ localStorage.setItem('pedalla.settings', JSON.stringify(S)); }catch(e){} }
@@ -273,7 +284,7 @@ function bindNum(id, key, after){
   const el=$(id); el.value=S[key];
   el.addEventListener('change', ()=>{ const v=parseFloat(el.value); if(isFinite(v)){ S[key]=v; saveS(); after&&after(); } else el.value=S[key]; });
 }
-bindNum('riderKg','riderKg'); bindNum('bikeKg','bikeKg'); bindNum('cda','cda', ()=>resetSent());
+bindNum('riderKg','riderKg'); bindNum('kmhPerRpm','kmhPerRpm'); bindNum('bikeKg','bikeKg'); bindNum('cda','cda', ()=>resetSent());
 bindNum('ergW','ergW', ()=>resetSent());
 bindNum('offset','offset', ()=>{ if(route && !route.synthetic && vid.duration){ route.videoSpan=Math.max(1, vid.duration-S.offset); onRouteReady(); } saveOffsetForSelected(); });
 bindNum('resMax','resMax', ()=>{ $('tResMax').textContent='/'+S.resMax; res.shown=null; });
@@ -301,7 +312,15 @@ function setPower(w){ live.power = Math.max(0,w); live.powerAt = performance.now
 function setSpeed(kmh){ live.speed = kmh; live.speedAt = performance.now(); }
 function trainerConnected(){ return !!(trainer.dev && trainer.dev.gatt && trainer.dev.gatt.connected); }
 // Cihaz watt göndermiyorsa (ucuz spin bike'larda sık) hızı doğrudan cihazdan al
-function speedMode(){ return trainerConnected() && !live.powerSeen && performance.now()-live.speedAt < 3000; }
+function speedMode(){ return trainerConnected() && !live.powerSeen; }
+// Watt gelmiyorsa: bisikletin hızı (>0 ise), o da yoksa kadans × ayar
+function noPowerSpeedKmh(){
+  const now=performance.now();
+  if(now-live.speedAt < 3000 && live.speed > 0.5) { live.speedSrc='bisiklet'; return live.speed; }
+  const c = now-live.cadAt < 3000 ? (live.cad||0) : 0;
+  live.speedSrc='kadans';
+  return c > 5 ? c*S.kmhPerRpm : 0;
+}
 function setCad(c){ live.cad = c; live.cadAt = performance.now(); }
 function currentPower(){
   const fresh = performance.now() - live.powerAt < 3000;
@@ -355,8 +374,8 @@ function onCPResp(dv){
   } else if(res!==0x01){
     console.warn('FTMS komut 0x'+op.toString(16)+' sonucu 0x'+res.toString(16));
     if(op===0x11 && res===0x02){
-      trainer.sup.sim=false; resetSent();
-      toast(trainer.sup.res||!trainer.sup.known ? 'Bisiklet eğim komutunu desteklemiyor — direnç seviyesiyle devam ediliyor.' : 'Bisiklet eğim komutunu desteklemiyor — ERG modunu dene.');
+      const first = trainer.sup.sim!==false; trainer.sup.sim=false; resetSent();
+      if(first) toast(trainer.sup.res||!trainer.sup.known ? 'Bisiklet eğim komutunu desteklemiyor — direnç seviyesiyle devam ediliyor.' : 'Bisiklet eğim komutunu desteklemiyor — ERG modunu dene.');
       if(!trainer.sup.known) trainer.sup.res=true;   // özellik okunamadıysa direnç seviyesini dene
     }
     if(op===0x04 && res===0x03 && trainer.resBytes===1){ trainer.resBytes=2; resetSent(); }
@@ -1170,7 +1189,7 @@ document.addEventListener('keydown', e=>{ if(e.code==='Space' && e.target.tagNam
 /* ========================= fizik + video senkron ========================= */
 function physics(dt, P){
   if(speedMode()){                              // watt yok → bisikletin hızını yumuşatarak kullan
-    const target = Math.max(0, live.speed||0)/3.6;
+    const target = Math.max(0, noPowerSpeedKmh())/3.6;
     v += (target - v) * Math.min(1, dt*2);
     if(target===0 && v<0.2) v=0;
     dist = Math.min(route.total, dist + v*dt);
