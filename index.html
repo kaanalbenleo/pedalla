@@ -206,6 +206,7 @@
         </div>
         <div class="row" style="margin-top:8px"><input type="url" id="ytUrl" placeholder="veya YouTube linki yapıştır"><button class="btn" id="btnYt">▶ YouTube</button></div>
         <div class="status" id="stRoute">Video ve/veya GPX yükle</div>
+        <div class="row"><label>YouTube HD (1080p) — yavaş internette kapat</label><input type="checkbox" id="ytHd" style="width:22px;height:22px;accent-color:var(--acc)"></div>
         <div class="row"><label>Alttan kırp (videodaki hız göstergesini gizler)</label><input type="range" id="cropBottom" min="0" max="35" step="1"><span id="cropV" style="width:40px;text-align:right"></span></div>
         <div id="routeNote" class="note" style="display:none"></div>
         <div class="row"><label>GPX başlangıcı videoda (sn)</label><input type="number" id="offset" step="0.5"></div>
@@ -275,7 +276,7 @@ let toastT; function toast(msg, ms=3500){ const t=$('toast'); t.textContent=msg;
 
 /* ========================= ayarlar ========================= */
 const DEF = { riderKg:75, bikeKg:9, cda:0.32, crr:0.004, difficulty:50, mode:'sim', ergW:150,
-  offset:0, noGpxSpeed:25, noGpxGrade:0, demoW:0, resMax:10, resFlat:3, resPerPct:2, cropBottom:0, kmhPerRpm:0.3 };
+  offset:0, noGpxSpeed:25, noGpxGrade:0, demoW:0, resMax:10, resFlat:3, resPerPct:2, cropBottom:0, kmhPerRpm:0.3, ytHd:true };
 const S = Object.assign({}, DEF);
 try { Object.assign(S, JSON.parse(localStorage.getItem('pedalla.settings')||'{}')); } catch(e){}
 function saveS(){ try{ localStorage.setItem('pedalla.settings', JSON.stringify(S)); }catch(e){} }
@@ -835,9 +836,18 @@ function layoutMedia(){
   const top = H - ih*(1-k), left = (W-iw)/2;
   const box = el => { el.style.width=iw+'px'; el.style.height=ih+'px'; el.style.top=top+'px'; el.style.left=left+'px'; };
   if(media==='file'){ vidEl.classList.add('cropped'); box(vidEl); }
-  const f=$('ytWrap').querySelector('iframe'); if(f) box(f);
+  const f=$('ytWrap').querySelector('iframe');
+  if(f){
+    // YouTube kaliteyi oynatıcının boyutuna göre seçer → oynatıcıyı en az 1920 px genişlikte oluştur, ekrana küçült
+    const realW = Math.max(iw, S.ytHd ? 1920 : 0), sc = iw/realW;
+    f.style.width=realW+'px'; f.style.height=(realW/ar)+'px';
+    f.style.left=left+'px'; f.style.top=top+'px';
+    f.style.transformOrigin='0 0'; f.style.transform = sc<1 ? `scale(${sc})` : '';
+  }
 }
 window.addEventListener('resize', layoutMedia);
+$('ytHd').checked=!!S.ytHd;
+$('ytHd').addEventListener('change', e=>{ S.ytHd=e.target.checked; saveS(); layoutMedia(); });
 $('cropBottom').value=S.cropBottom; $('cropV').textContent=S.cropBottom+'%';
 $('cropBottom').addEventListener('input', e=>{ S.cropBottom=+e.target.value; $('cropV').textContent=S.cropBottom+'%'; saveS(); layoutMedia(); });
 function showMedia(kind){
@@ -889,7 +899,7 @@ async function loadYoutube(){
   $('stRoute').textContent='YouTube videosu yükleniyor…'; $('stRoute').className='status';
   yt = new YT.Player('yt', {
     videoId:id, width:'100%', height:'100%',
-    playerVars:{ controls:0, disablekb:1, modestbranding:1, playsinline:1, rel:0, iv_load_policy:3, fs:0, mute:1 },
+    playerVars:{ controls:0, disablekb:1, modestbranding:1, playsinline:1, rel:0, iv_load_policy:3, fs:0, mute:1, vq:'hd1080' },
     events:{
       onReady:()=>{
         yt.mute();
